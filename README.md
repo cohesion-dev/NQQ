@@ -40,4 +40,4 @@ docs/     设计与实现文档
 
 ## 开发协作
 
-项目功能必须通过 Pull Request 提交。创建或更新 PR 前，先将当前分支 rebase 到最新的 `main` 分支；合并前所有 CI 检查必须通过。具体协作规范见 [`AGENTS.md`](AGENTS.md)。
+项目功能必须通过 Pull Request 提交。创建提交前，必须先获取远端最新的 `main` 分支，将当前工作分支 rebase 到 `origin/main`，并解决全部冲突；合并前所有 CI 检查必须通过。具体协作规范见 [`AGENTS.md`](AGENTS.md)。
