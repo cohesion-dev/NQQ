@@ -4,7 +4,11 @@ import { chromium, devices } from 'playwright';
 
 const browser = await chromium.launch({
   executablePath: process.env.NQQ_BROWSER_PATH || undefined,
-  args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'],
+  args: [
+    '--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader',
+    // 无 GPU 的 CI 环境回读 WebGL 画布会卡在共享图像，改为纯软件合成并关掉新截图路径。
+    '--disable-gpu', '--disable-features=CDPScreenshotNewSurface',
+  ],
 });
 try {
   // 使用模拟网关验证模式切换和页面契约，不代表真实灵矽或真机验收通过。
@@ -65,7 +69,9 @@ try {
         && stage.top >= 0 && stage.bottom <= innerHeight && stage.height > 150;
     });
     assert.equal(fits, true, `layout fits 428x${height}`);
-    await page.screenshot({ path: `test-results/iphone12-pro-max-${height}.png`, fullPage: true });
+    // 假时钟会暂停动画帧，截图前恢复时钟，让页面能正常渲染出帧。
+    await page.clock.resume();
+    await page.screenshot({ path: `test-results/iphone12-pro-max-${height}.png`, fullPage: true, timeout: 60000 });
   }
   assert.deepEqual(errors, []);
   console.info('Chat/game mode switch, buttonless UI, mocked tools and iPhone layout tests passed');
