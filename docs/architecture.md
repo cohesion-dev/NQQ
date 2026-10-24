@@ -4,7 +4,7 @@
 
 ## 1. 系统组成
 
-应用由浏览器页面和 Node.js（服务端 JavaScript 运行环境）接入网关组成。灵矽提供语音识别、意图理解、工具调用和问答；浏览器执行游戏规则和动画。当前回复声音由浏览器朗读占位，不播放灵矽返回的压缩语音。
+应用由浏览器页面和 Node.js（服务端 JavaScript 运行环境）接入网关组成。灵矽提供语音识别、意图理解、工具调用和问答；浏览器执行游戏规则和动画。角色声音由灵矽合成，网关转发原始音频，页面解码播放；字幕不触发本地朗读。
 
 ```mermaid
 flowchart LR
@@ -17,7 +17,7 @@ flowchart LR
         Game --> Scene[SceneView 三维场景]
         Skills --> Scene
         Game --> UI[UiController 数字与字幕]
-        Main --> Voice[MockAudio 本地朗读]
+        Main --> Voice[LinxAudio 真实语音解码播放]
     end
     Client <-->|同源双向连接| Gateway[Node.js 灵矽网关]
     Gateway <-->|设备握手、音频、工具| Linx[灵矽平台]
@@ -43,7 +43,9 @@ flowchart LR
 | 空闲计时 | 静默五秒后触发舞蹈，每支结束停半秒再随机续播 | [ChatIdleTimer.ts](../web/src/scene/ChatIdleTimer.ts) |
 | 页面显示 | 切换聊天/游戏数字图层、展示最多一百条对话记录；不渲染操作按钮 | [UiController.ts](../web/src/ui/UiController.ts) |
 | 音频输入 | 申请麦克风、分帧、语音活动检测、回复播放时暂停上传 | [PcmRecorder.ts](../web/src/audio/PcmRecorder.ts)、[pcm-worklet.js](../web/src/audio/pcm-worklet.js) |
-| 声音占位 | 浏览器文字朗读、简单合成音效、模拟说话振幅 | [MockAudio.ts](../web/src/audio/MockAudio.ts) |
+| 语音输出 | 按下行参数解码、连续播放、取消旧任务、按实际振幅驱动嘴型 | [LinxAudio.ts](../web/src/audio/LinxAudio.ts) |
+| 游戏音效 | 仅生成抓取、疲惫等短音效，不朗读角色回复 | [GameAudio.ts](../web/src/audio/GameAudio.ts) |
+| 音频转发 | 过滤非播放轮次的音频，转发下行参数、状态与原始二进制帧 | [audio-relay.ts](../server/audio-relay.ts)、[共享参数](../shared/audio.ts) |
 | 浏览器连接 | 申请本地会话、连接同源网关、传递控制消息与音频 | [LinxClient.ts](../web/src/linx/LinxClient.ts) |
 | 接入网关 | 设备激活与绑定、上游连接、工具发现、模式与截止校验、去重、结果回传 | [server/index.ts](../server/index.ts) |
 | 工具契约 | 四个工具的参数定义、动作集合、参数检查和模式限制 | [shared/tools.ts](../shared/tools.ts) |
@@ -90,13 +92,18 @@ sequenceDiagram
     end
     Linx-->>Gateway: 回复文字句子
     Gateway-->>App: reply
-    App->>Audio: 暂停检测与上传，朗读后恢复
-    App->>Player: 字幕与浏览器本地朗读
+    App->>Player: 显示字幕
+    Linx-->>Gateway: tts.start / 二进制音频 / tts.stop
+    Gateway-->>App: audio.start / 二进制音频 / audio.stop
+    App->>Audio: 开始时暂停检测与上传，缓冲播完后恢复
+    App->>Player: 解码并播放真实语音
 ```
 
 音频工作线程把输入转换为 PCM（Pulse-Code Modulation，脉冲编码调制）16kHz 单声道、16 位小端数据，每帧二十毫秒。VAD（Voice Activity Detection，语音活动检测）根据音量判定语音开始，连续静音约七百毫秒后结束当前轮次；工作线程输出静音，不把麦克风原声回放。
 
-网关把识别文字转为 `transcript`，把上游回复句子的文字转为 `reply`，忽略上游二进制音频。页面收到回复后暂停采集器的检测与上传，由浏览器朗读，结束后恢复。因此当前链路不等于已接通灵矽的正式音色、压缩语音播放或逐音素嘴型。
+网关把识别文字转为 `transcript`，回复句子文字转为 `reply`，同时转发 `hello.audio_params`、语音状态和原始二进制帧。页面使用 `opus-decoder` 的 WebAssembly（浏览器可运行的二进制模块）解码 Opus（音频压缩编码格式），也支持单声道十六位小端 PCM。解码器采样率取服务端下行参数，不沿用麦克风参数。
+
+播放开始时暂停麦克风检测与上传，以避免把回复当作用户输入；正常结束等所有待解码帧与已调度音源排空后再恢复。打断、断线或后台切换立即停音，并通过取消代次阻止旧异步任务重新播放。当前不支持在回复播放期间靠本地麦克风抢话；支持上游打断状态和开始新输入时取消旧语音。嘴型使用输出振幅，不代表逐音素嘴型。系统限制自动播放时需轻触页面解锁音频。
 
 网关保留游戏中的文字提交协议用于开发联调，但页面没有文字输入入口；普通聊天和动作指令由真实语音进入灵矽，不在页面使用关键词规则代替意图理解。
 
@@ -133,7 +140,7 @@ sequenceDiagram
 | 上游断线或设备错误 | 网关清理当前连接、定时器和设备锁；页面停止采集并取消聊天动作，提示刷新重试 |
 | 页面进入后台 | 停止当前游戏动作和聊天技能、释放麦克风、停止声音并关闭连接 |
 | 页面重新可见 | 重新建立连接；当前没有跨连接续局协议 |
-| 自然结算后继续聊天 | 当前 `game_ended` 分支停止麦克风且未立即重启采集，继续语音需刷新页面重新连接 |
+| 自然结算后继续聊天 | 返回聊天视图并保留采集；本地结算提示仅显示字幕，灵矽角色回复通过真实音频播放 |
 | 刷新或关闭页面 | 本局状态只在页面内存中，不持久化分数，也不能恢复上一局 |
 
 去重与设备锁都只在单个网关进程内生效，不是跨实例的分布式保证。网关没有账号登录或对外发布所需的完整访问控制，现有同源检查和设备会话用于本地接入。
@@ -151,7 +158,8 @@ sequenceDiagram
 
 - [规则测试](../web/src/game/game-engine.test.ts)和[圆周路径测试](../tests/game-spin.test.ts)验证游戏事实、时间边界、停止、触边与抓取；不依赖灵矽判断结果。
 - [聊天技能测试](../tests/chat-skills.test.ts)读取实际模型、比较骨骼姿态，验证片段完成、取消、随机候选和优先关系；图片解码不在该测试范围内。
+- [语音测试](../tests/linx-audio.test.ts)使用真实 Opus 解码器和可控扬声器验证采样、调度、排空与取消，并串联网关音频转发和客户端收包；不代表音色听感验收。
 - [浏览器测试](../tests/browser.mjs)使用模拟网关验证页面契约和工具链路，不代表真实账号、麦克风或真机通过。
 - 真实灵矽已验证设备握手和工具发现；完整语音驱动游戏、长舞蹈调用和手机录放音仍需实际验收。具体证据和环境限制见[验证记录](verification.md)。
 
-后续原生 iOS 外壳、真实音色播放、服务端计分和公开部署能力均不作为当前已实现架构的一部分。
+后续原生 iOS 外壳、服务端计分和公开部署能力不作为当前已实现架构的一部分。真实音色播放代码已接入，控制台换音色后的实际听感与 iPhone 录放音仍需联调验收。

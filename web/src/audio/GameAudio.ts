@@ -1,30 +1,6 @@
-/** 使用浏览器语音合成模拟灵矽语音，真实音频链路接通后替换本类。 */
-export class MockAudio {
-  private current: SpeechSynthesisUtterance | null = null;
+/** 仅生成抓取与疲惫音效，角色回复由灵矽真实语音播放器负责。 */
+export class GameAudio {
   private context?: AudioContext;
-
-  /** 本地嘴型只使用模拟朗读状态，不宣称取得真实语音振幅。 */
-  get speaking(): boolean { return this.current !== null && window.speechSynthesis?.speaking; }
-
-  /** 播放本地模拟语音，并在播放前停止上一段回复。 */
-  speak(text: string, interrupt = true, onEnd: () => void = () => {}): void {
-    if (interrupt) this.stop();
-    if (!('speechSynthesis' in window)) { onEnd(); return; }
-    const utterance = new SpeechSynthesisUtterance(text);
-    utterance.lang = 'zh-CN';
-    utterance.rate = 1.08;
-    utterance.pitch = 1.1;
-    utterance.onend = () => { if (this.current === utterance) this.current = null; onEnd(); };
-    utterance.onerror = () => { if (this.current === utterance) this.current = null; onEnd(); };
-    this.current = utterance;
-    window.speechSynthesis.speak(utterance);
-  }
-
-  /** 停止当前模拟语音。 */
-  stop(): void {
-    if ('speechSynthesis' in window) window.speechSynthesis.cancel();
-    this.current = null;
-  }
 
   /** 播放不依赖外部文件的短音效。 */
   effect(kind: 'grab' | 'expire' | 'tired' | 'finish'): void {
@@ -46,9 +22,8 @@ export class MockAudio {
     oscillator.addEventListener('ended', () => { oscillator.disconnect(); gain.disconnect(); });
   }
 
-  /** 离开页面时释放模拟声音资源。 */
+  /** 离开页面时释放游戏音效资源。 */
   dispose(): void {
-    this.stop();
     if (this.context) void this.context.close();
     this.context = undefined;
   }

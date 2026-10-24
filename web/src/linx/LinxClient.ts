@@ -7,7 +7,7 @@ export class LinxClient {
   private ready = false;
 
   /** 使用调用方事件处理器路由真实工具请求和字幕。 */
-  constructor(private readonly onMessage: (message: LinxMessage) => void) {}
+  constructor(private readonly onMessage: (message: LinxMessage) => void, private readonly onAudio: (frame: ArrayBuffer) => void) {}
 
   /** 申请设备会话并等待灵矽握手与工具发现。 */
   async connect(): Promise<void> {
@@ -16,9 +16,11 @@ export class LinxClient {
     if (!response.ok) throw new Error('SESSION_FAILED');
     return new Promise((resolve, reject) => {
       const socket = new WebSocket(`${location.protocol === 'https:' ? 'wss:' : 'ws:'}//${location.host}/api/linx`);
+      socket.binaryType = 'arraybuffer';
       this.socket = socket;
       socket.addEventListener('message', (event) => {
         if (this.socket !== socket) return;
+        if (event.data instanceof ArrayBuffer) { this.onAudio(event.data); return; }
         const message = JSON.parse(event.data) as LinxMessage;
         if (message.type === 'ready') { this.ready = true; resolve(); }
         if (message.type === 'round') this.roundId = message.roundId;

@@ -3,7 +3,8 @@ import { GameEngine, type ActionResult } from './game/engine';
 import { SceneView } from './scene/SceneView';
 import { UiController } from './ui/UiController';
 import { LinxClient, type LinxMessage } from './linx/LinxClient';
-import { MockAudio } from './audio/MockAudio';
+import { GameAudio } from './audio/GameAudio';
+import { LinxAudio } from './audio/LinxAudio';
 import { PcmRecorder } from './audio/PcmRecorder';
 import { canPerformAction, chatSkills } from '../../shared/tools';
 import { ChatIdleTimer } from './scene/ChatIdleTimer';
@@ -13,7 +14,7 @@ function startApp(): void {
   const root = document.querySelector<HTMLDivElement>('#app')!;
   const game = new GameEngine();
   const scene = new SceneView(root);
-  const audio = new MockAudio();
+  const effects = new GameAudio();
   const recorder = new PcmRecorder();
   const idleTimer = new ChatIdleTimer();
   let connected = false;
@@ -21,15 +22,25 @@ function startApp(): void {
   let currentRound = '';
   let lifespan = 60_000;
   let recorderStarted = false;
-  const client = new LinxClient((message) => void receive(message));
+  const client = new LinxClient((message) => void receive(message), (frame) => { void audio.push(frame); });
   const ui = new UiController(root);
+  const audio = new LinxAudio((active) => {
+    idleTimer.reset();
+    if (active) {
+      scene.cancelIdleDance();
+      const activeTurn = recorder.isSpeechActive;
+      recorder.pause();
+      if (activeTurn) client.send({ type: 'speech.stop' });
+    } else recorder.resume();
+  }, (code) => ui.notice(code === 'AUDIO_PLAYBACK_BLOCKED'
+    ? '请轻触页面以允许播放牛七七的声音。'
+    : `语音播放失败：${code}，请刷新页面重试。`));
 
-  /** 角色声音暂用浏览器本地朗读，保留聊天或游戏回复字幕。 */
-  function say(text: string, interrupt = true, onEnd: () => void = () => {}): void {
+  /** 展示字幕和本地结算提示，只有灵矽下发的音频可以发出角色声音。 */
+  function say(text: string): void {
     idleTimer.reset();
     scene.cancelIdleDance();
     ui.say(text);
-    audio.speak(text, interrupt, onEnd);
   }
 
   /** 结束监听，不把未实际开始的授权请求误认为已上传语音。 */
@@ -42,15 +53,18 @@ function startApp(): void {
   function startRecorder(): void {
     if (!connected || recorderStarted) return;
     recorderStarted = true;
-    audio.stop();
     void recorder.start({
       onSpeechStart: () => {
+        audio.stop();
         idleTimer.reset();
         scene.cancelIdleDance();
         client.send({ type: 'speech.start' });
       },
       onSpeechStop: () => { client.send({ type: 'speech.stop' }); },
       onFrame: (frame) => client.sendAudio(frame),
+    }).then(() => {
+      // 麦克风授权期间也可能收到回复，采集就绪后仍需遵守播放占用。
+      if (audio.speaking) recorder.pause();
     }).catch(() => {
       recorderStarted = false;
       ui.notice('无法使用麦克风，请在浏览器设置中允许访问后重试。');
@@ -59,6 +73,9 @@ function startApp(): void {
 
   /** 处理网关转发的灵矽消息和两个模式的工具结果。 */
   async function receive(message: LinxMessage): Promise<void> {
+    if (message.type === 'audio.config') { audio.configure(message.params); return; }
+    if (message.type === 'audio.start') { audio.start(); return; }
+    if (message.type === 'audio.stop') { audio.finish(message.aborted === true); return; }
     if (message.type === 'ready') {
       idleTimer.reset();
       connected = true;
@@ -97,10 +114,7 @@ function startApp(): void {
       return;
     }
     if (message.type === 'reply') {
-      const activeTurn = recorder.isSpeechActive;
-      recorder.pause();
-      if (activeTurn) client.send({ type: 'speech.stop' });
-      say(message.text, false, () => recorder.resume());
+      say(message.text);
       return;
     }
     if (message.type === 'finished') {
@@ -112,11 +126,13 @@ function startApp(): void {
     }
     if (message.type === 'cancel') { idleTimer.reset(); game.stop(); scene.cancelChatSkill(); return; }
     if (message.type === 'error' || message.type === 'activation') {
+      audio.stop();
       connected = false; stopRecording(); scene.cancelChatSkill();
       ui.notice(connectionError(message));
       return;
     }
     if (message.type === 'disconnected') {
+      audio.stop();
       connected = false; stopRecording(); scene.cancelChatSkill();
       ui.notice('语音连接已断开，请刷新页面后重试。');
     }
@@ -175,10 +191,9 @@ function startApp(): void {
   game.subscribe((snapshot, events) => {
     scene.render(snapshot, events); ui.render(snapshot);
     for (const event of events) {
-      if (event.type === 'apple_collected') audio.effect('grab');
-      if (event.type === 'tired_entered') audio.effect('tired');
+      if (event.type === 'apple_collected') effects.effect('grab');
+      if (event.type === 'tired_entered') effects.effect('tired');
       if (event.type === 'game_ended' && mode === 'apple-game') {
-        stopRecording();
         mode = 'chat';
         currentRound = '';
         scene.setMode(mode);
@@ -196,15 +211,18 @@ function startApp(): void {
     if (mode === 'apple-game') game.tick();
     if (idleTimer.update(performance.now(), connected && mode === 'chat' && !document.hidden,
       recorder.isSpeechActive || audio.speaking, scene.isChatSkillPlaying, scene.isIdleDancePlaying)) scene.playIdleDance();
-    scene.setSpeechAmplitude(audio.speaking ? 0.35 + Math.sin(performance.now() / 80) * 0.2 : 0);
+    scene.setSpeechAmplitude(audio.amplitude);
     requestAnimationFrame(tick);
   }
   requestAnimationFrame(tick);
+  document.addEventListener('pointerdown', () => {
+    void audio.unlock().catch(() => ui.notice('无法启用声音，请检查浏览器播放权限。'));
+  });
   document.addEventListener('visibilitychange', () => {
     if (document.hidden) { connected = false; game.stop(); scene.cancelChatSkill(); stopRecording(); audio.stop(); client.close(); }
     else void client.connect();
   });
-  window.addEventListener('pagehide', () => { game.stop(); recorder.stop(); audio.dispose(); client.close(); scene.dispose(); });
+  window.addEventListener('pagehide', () => { game.stop(); recorder.stop(); audio.dispose(); effects.dispose(); client.close(); scene.dispose(); });
 }
 
 startApp();
