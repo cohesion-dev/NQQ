@@ -5,6 +5,8 @@ import { UiController } from './ui/UiController';
 import { LinxClient, type LinxMessage } from './linx/LinxClient';
 import { MockAudio } from './audio/MockAudio';
 import { PcmRecorder } from './audio/PcmRecorder';
+import { canPerformAction, chatSkills } from '../../shared/tools';
+import { ChatIdleTimer } from './scene/ChatIdleTimer';
 
 /** 默认进入聊天模式；只有灵矽调用开始游戏工具后才启动抓苹果规则。 */
 function startApp(): void {
@@ -13,6 +15,7 @@ function startApp(): void {
   const scene = new SceneView(root);
   const audio = new MockAudio();
   const recorder = new PcmRecorder();
+  const idleTimer = new ChatIdleTimer();
   let connected = false;
   let mode: 'chat' | 'apple-game' = 'chat';
   let currentRound = '';
@@ -22,7 +25,12 @@ function startApp(): void {
   const ui = new UiController(root);
 
   /** 角色声音暂用浏览器本地朗读，保留聊天或游戏回复字幕。 */
-  function say(text: string, interrupt = true, onEnd: () => void = () => {}): void { ui.say(text); audio.speak(text, interrupt, onEnd); }
+  function say(text: string, interrupt = true, onEnd: () => void = () => {}): void {
+    idleTimer.reset();
+    scene.cancelIdleDance();
+    ui.say(text);
+    audio.speak(text, interrupt, onEnd);
+  }
 
   /** 结束监听，不把未实际开始的授权请求误认为已上传语音。 */
   function stopRecording(): void {
@@ -36,7 +44,11 @@ function startApp(): void {
     recorderStarted = true;
     audio.stop();
     void recorder.start({
-      onSpeechStart: () => { client.send({ type: 'speech.start' }); },
+      onSpeechStart: () => {
+        idleTimer.reset();
+        scene.cancelIdleDance();
+        client.send({ type: 'speech.start' });
+      },
       onSpeechStop: () => { client.send({ type: 'speech.stop' }); },
       onFrame: (frame) => client.sendAudio(frame),
     }).catch(() => {
@@ -48,11 +60,13 @@ function startApp(): void {
   /** 处理网关转发的灵矽消息和两个模式的工具结果。 */
   async function receive(message: LinxMessage): Promise<void> {
     if (message.type === 'ready') {
+      idleTimer.reset();
       connected = true;
       startRecorder();
       return;
     }
     if (message.type === 'round' && message.mode === 'apple-game') {
+      idleTimer.reset();
       currentRound = message.roundId;
       lifespan = 60_000;
       mode = 'apple-game';
@@ -62,6 +76,7 @@ function startApp(): void {
       return;
     }
     if (message.type === 'mode') {
+      idleTimer.reset();
       mode = message.mode === 'apple-game' ? 'apple-game' : 'chat';
       scene.setMode(mode);
       ui.setMode(mode);
@@ -69,11 +84,18 @@ function startApp(): void {
       return;
     }
     if (message.type === 'tool') {
+      idleTimer.reset();
+      scene.cancelIdleDance();
       const result = await handleTool(message);
       if (result !== undefined) client.send({ type: 'result', roundId: message.roundId || currentRound, requestId: message.requestId, result, failed: 'status' in result && result.status !== 'completed' });
       return;
     }
-    if (message.type === 'transcript') { ui.say(message.text, '你'); return; }
+    if (message.type === 'transcript') {
+      idleTimer.reset();
+      scene.cancelIdleDance();
+      ui.say(message.text, '你');
+      return;
+    }
     if (message.type === 'reply') {
       const activeTurn = recorder.isSpeechActive;
       recorder.pause();
@@ -88,19 +110,19 @@ function startApp(): void {
       scene.setMode(mode); ui.setMode(mode);
       return;
     }
-    if (message.type === 'cancel') { game.stop(); return; }
+    if (message.type === 'cancel') { idleTimer.reset(); game.stop(); scene.cancelChatSkill(); return; }
     if (message.type === 'error' || message.type === 'activation') {
-      connected = false; stopRecording();
+      connected = false; stopRecording(); scene.cancelChatSkill();
       ui.notice(connectionError(message));
       return;
     }
     if (message.type === 'disconnected') {
-      connected = false; stopRecording();
+      connected = false; stopRecording(); scene.cancelChatSkill();
       ui.notice('语音连接已断开，请刷新页面后重试。');
     }
   }
 
-  /** 执行灵矽请求的本地结果，只有抓苹果模式才允许动作。 */
+  /** 游戏动作走规则引擎，聊天技能独立播放并等待实际结果。 */
   async function handleTool(message: LinxMessage): Promise<Record<string, unknown> | ActionResult | undefined> {
     if (message.name === 'self.niuqiqi.start_apple_game') {
       if (mode === 'apple-game' && game.snapshot().phase === 'running') return { status: 'completed', mode: 'apple-game', message: 'Apple game already started' };
@@ -121,6 +143,16 @@ function startApp(): void {
       return { mode, phase: snapshot.phase, score: snapshot.score, remainingMs: snapshot.remainingMs, fatigued: snapshot.fatigued };
     }
     if (message.name === 'self.niuqiqi.do_action') {
+      const action = message.args.action;
+      if (!canPerformAction(mode, action)) return { status: 'rejected', reason: 'action_unavailable_in_mode' };
+      if (mode === 'chat') {
+        if (action === 'stop') {
+          scene.cancelChatSkill();
+          return { status: 'completed', action, mode: 'chat' };
+        }
+        const skill = chatSkills.find((name) => name === action)!;
+        return { ...await scene.playChatSkill(skill) };
+      }
       if (mode !== 'apple-game' || game.snapshot().phase !== 'running') return { status: 'rejected', reason: 'game_not_running' };
       return game.requestAction(message.args.action, message.args.steps);
     }
@@ -159,15 +191,17 @@ function startApp(): void {
   ui.render(game.snapshot()); scene.render(game.snapshot());
   /** 启动页面后建立聊天连接，让用户打开应用即可和牛七七说话。 */
   void client.connect().catch((error) => ui.notice(`无法连接牛七七：${error instanceof Error ? error.message : 'UNKNOWN_ERROR'}`));
-  /** 帧循环只推进游戏模式的规则时钟。 */
+  /** 推进游戏时钟，并在聊天空闲十秒后触发一次自动表演。 */
   function tick(): void {
     if (mode === 'apple-game') game.tick();
+    if (idleTimer.update(performance.now(), connected && mode === 'chat' && !document.hidden,
+      recorder.isSpeechActive || audio.speaking, scene.isChatSkillPlaying)) scene.playIdleDance();
     scene.setSpeechAmplitude(audio.speaking ? 0.35 + Math.sin(performance.now() / 80) * 0.2 : 0);
     requestAnimationFrame(tick);
   }
   requestAnimationFrame(tick);
   document.addEventListener('visibilitychange', () => {
-    if (document.hidden) { connected = false; game.stop(); stopRecording(); audio.stop(); client.close(); }
+    if (document.hidden) { connected = false; game.stop(); scene.cancelChatSkill(); stopRecording(); audio.stop(); client.close(); }
     else void client.connect();
   });
   window.addEventListener('pagehide', () => { game.stop(); recorder.stop(); audio.dispose(); client.close(); scene.dispose(); });

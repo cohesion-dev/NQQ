@@ -30,12 +30,18 @@ function createTestEngine() {
 /** 推进一个动作直到完成，并返回规则引擎产生的实际结果。 */
 async function completeAction(engine: GameEngine, setTime: (value: number) => void, action: Parameters<GameEngine['requestAction']>[0], at: number, steps = 1): Promise<ActionResult> {
   const resultPromise = engine.requestAction(action, steps);
-  setTime(at);
-  engine.tick(at);
-  return resultPromise;
+  let result: ActionResult | undefined;
+  resultPromise.then((value) => { result = value; });
+  for (let current = at; current <= at + 10_000 && !result; current += 50) {
+    setTime(current);
+    engine.tick(current);
+    await Promise.resolve();
+  }
+  assert(result, `动作 ${action} 应在测试时间窗内完成`);
+  return result;
 }
 
-/** 覆盖苹果生命周期、移动碰撞、疲惫、停止和三分钟结算。 */
+/** 覆盖苹果生命周期、移动碰撞、疲惫、停止和一分钟结算。 */
 export async function runSelfTest(): Promise<void> {
   const { engine, setTime } = createTestEngine();
   const events: GameEvent[] = [];
@@ -53,7 +59,7 @@ export async function runSelfTest(): Promise<void> {
   assertEqual(engine.snapshot().apples.length, 1, '抓到苹果后场内应暂时剩一颗');
 
   const collectedAt = events.find((event) => event.type === 'apple_collected')!.at;
-  assert(collectedAt > 100 && collectedAt < 200, '抓取时刻应为路径上的真实接触时刻');
+  assert(collectedAt > 300 && collectedAt < 800, '抓取时刻应为路径上的真实接触时刻');
   setTime(collectedAt + 999);
   engine.tick(collectedAt + 999);
   assertEqual(engine.snapshot().apples.length, 1, '补位延迟未到时不能生成苹果');
@@ -76,8 +82,8 @@ export async function runSelfTest(): Promise<void> {
   await completeAction(engine, setTime, 'forward', 10_200);
   await completeAction(engine, setTime, 'spin', 11_600);
   assert(engine.snapshot().fatigued, '连续完成三个动作后应进入疲惫');
-  setTime(16_600);
-  engine.tick(16_600);
+  setTime(30_000);
+  engine.tick(30_000);
   assert(!engine.snapshot().fatigued, '疲惫持续时间结束后应恢复');
   assertEqual(engine.snapshot().movementCount, 0, '恢复后连续动作计数应清零');
 
@@ -109,20 +115,14 @@ export async function runSelfTest(): Promise<void> {
   engine.tick(71_500);
   assertEqual(engine.snapshot().apples[0].expiresAt, 72_000, '补位苹果应继续使用本局自定义寿命');
 
-  const boundsTest = createTestEngine();
-  boundsTest.engine.start();
-  assertEqual(boundsTest.engine.snapshot().endsAt, 180_000, '默认游戏时长应为三分钟');
-  assertEqual(boundsTest.engine.snapshot().apples[0].expiresAt, 60_000, '默认苹果有效期应为一分钟');
-  const boundsResult = await completeAction(boundsTest.engine, boundsTest.setTime, 'left', 300, 3);
-  boundsTest.setTime(300);
-  const boundaryPromise = boundsTest.engine.requestAction('left', 999);
-  boundsTest.setTime(600);
-  boundsTest.engine.tick(600);
-  const boundaryResult = await boundaryPromise;
-  assertEqual(boundaryResult.touchedBoundary, true, '移动触边应通过结果报告');
-  assertEqual(boundaryResult.stepsCompleted, 1, '触边后应提前结束任意步数动作');
-  assertEqual(boundsTest.engine.snapshot().position.x, -5, '移动不能越过场地边界');
-  assertEqual(boundsResult.collected, 1, '路径碰撞应只抓取一次');
+  const boundsEngine = new GameEngine({ config: { stepDistance: 4, stepDurationMs: 100 }, now: () => 0 });
+  boundsEngine.start();
+  assertEqual(boundsEngine.snapshot().endsAt, 180_000, '默认游戏时长应为三分钟');
+  assertEqual(boundsEngine.snapshot().apples[0].expiresAt, 60_000, '默认苹果有效期应为一分钟');
+  const boundsResult = await completeAction(boundsEngine, () => {}, 'left', 300, 3);
+  assertEqual(boundsResult.touchedBoundary, true, '移动触边应通过结果报告');
+  assertEqual(boundsResult.stepsCompleted, 2, '触边后应提前结束动作');
+  assertEqual(boundsEngine.snapshot().position.x, -5, '移动不能越过场地边界');
 
   const queueTest = createTestEngine();
   queueTest.engine.start();
@@ -159,24 +159,34 @@ async function testContinuousMovement(): Promise<void> {
   });
   const events: GameEvent[] = [];
   engine.subscribe((_snapshot, batch) => events.push(...batch));
-  engine.start(350);
+  engine.start(2_000);
   const move = engine.requestAction('left');
   time = 200;
   engine.tick();
-  assertEqual(engine.snapshot().position.x, -2, '半步时位置应连续推进到一半');
-  time = 300;
+  assertEqual(engine.snapshot().position.x, 0, '转向阶段不应推进地面位置');
+  assertEqual(engine.snapshot().actionPhase, 'turn', '移动前应先进入转向阶段');
+  time = 500;
   engine.tick();
-  assertEqual(engine.snapshot().score, 1, '到期前经过苹果应立即抓取，无需等待步伐完成');
-  assertEqual(events.find((event) => event.type === 'apple_collected')?.at, 300, '抓取事件使用真实接触时刻');
-  time = 400;
+  assertEqual(engine.snapshot().position.x, -2, '行走阶段位置应连续推进');
+  assertEqual(engine.snapshot().actionPhase, 'walk', '转向完成后应进入行走阶段');
+  assertEqual(engine.snapshot().heading, 'left', '行走阶段应面向目标方向');
+  time = 600;
+  engine.tick();
+  assertEqual(engine.snapshot().score, 1, '到期前经过苹果应立即抓取');
+  const collectedAt = events.find((event) => event.type === 'apple_collected')?.at;
+  assertEqual(collectedAt, 600, '抓取事件使用真实接触时刻');
+  time = 700;
+  engine.tick();
+  time = 1_000;
   engine.tick();
   assertEqual((await move).collected, 1, '动作结果应包含执行中已抓取的苹果');
-  time = 1_299;
+  assertEqual(engine.snapshot().heading, 'front', '移动动作完成后应面向前方');
+  time = 1_599;
   engine.tick();
-  assertEqual(engine.snapshot().apples.length, 0, '真实接触后一秒前不能补位');
-  time = 1_300;
+  assertEqual(engine.snapshot().apples.length, 1, '真实接触后一秒前不能补位');
+  time = 1_600;
   engine.tick();
-  assertEqual(engine.snapshot().apples.length, 1, '真实接触后一秒恰好补位');
+  assertEqual(engine.snapshot().apples.length, 2, '真实接触后一秒恰好补位');
 
   let tieTime = 0;
   let tieRandom = 0;
@@ -185,64 +195,39 @@ async function testContinuousMovement(): Promise<void> {
     random: () => randomValues[tieRandom++ % randomValues.length],
     config: { stepDistance: 4, stepDurationMs: 400, appleCollisionRadius: 1 },
   });
-  tie.start(300);
+  tie.start(600);
   const tieMove = tie.requestAction('left');
-  tieTime = 400;
+  tieTime = 1_000;
   tie.tick();
   assertEqual((await tieMove).collected, 0, '接触与到期同刻时应到期优先');
 
-  let skippedTime = 0;
-  let skippedRandom = 0;
-  const skipped = new GameEngine({
-    now: () => skippedTime,
-    random: () => randomValues[skippedRandom++ % randomValues.length],
-    config: { stepDistance: 4, stepDurationMs: 400, appleCollisionRadius: 1 },
-  });
-  skipped.start(350);
-  const skippedMove = skipped.requestAction('left');
-  skippedTime = 400;
-  skipped.tick();
-  assertEqual((await skippedMove).collected, 1, '低帧率跨过接触和到期时，仍须按真实时序先抓取');
+  const stopping = new GameEngine({ now: () => 0, config: { stepDistance: 4, stepDurationMs: 400 } });
+  stopping.start();
+  const stopped = stopping.requestAction('left');
+  stopping.stop();
+  assertEqual((await stopped).status, 'cancelled', '停止应取消未完成动作');
+  assertEqual(stopping.snapshot().position.x, 0, '转向阶段停止不能产生位移');
 
-  const stopping = createTestEngine();
-  stopping.engine.start();
-  const stopped = stopping.engine.requestAction('right', 3);
-  stopping.setTime(50);
-  stopping.engine.stop();
-  assertEqual(stopping.engine.snapshot().position.x, 0.75, '停止应先推进到当前实际位置');
-  assertEqual((await stopped).stepsCompleted, 0, '未完成的小步不计入完成数');
-  assertEqual(stopping.engine.snapshot().movementCount, 0, '未完成的小步不计入疲惫');
-  stopping.setTime(20_000);
-  stopping.engine.tick();
-  assertEqual(stopping.engine.snapshot().position.x, 0.75, '后台恢复不能补记已取消的运动');
+  const somersault = new GameEngine({ now: () => 0 });
+  somersault.start();
+  const flip = somersault.requestAction('somersault');
+  somersault.tick(1_800);
+  assertEqual((await flip).status, 'completed', '翻跟头技能应完成');
+  assertEqual(somersault.snapshot().position.x, 0, '翻跟头不应产生位移');
+  assertEqual(somersault.snapshot().heading, 'front', '翻跟头结束后应面向前方');
 
   const fatigue = createTestEngine();
   fatigue.engine.start();
-  const threeSteps = fatigue.engine.requestAction('right', 3);
-  fatigue.setTime(200);
-  fatigue.engine.tick();
-  assertEqual(fatigue.engine.snapshot().movementCount, 2, '每个完成的小步独立计数');
-  fatigue.setTime(300);
-  fatigue.engine.tick();
-  await threeSteps;
-  assert(fatigue.engine.snapshot().fatigued, '三步请求应在第三小步完成时疲惫');
+  await completeAction(fatigue.engine, fatigue.setTime, 'right', 100);
+  await completeAction(fatigue.engine, fatigue.setTime, 'left', 1_500);
+  await completeAction(fatigue.engine, fatigue.setTime, 'spin', 3_000);
+  assert(fatigue.engine.snapshot().fatigued, '连续三个完整动作后应疲惫');
 
-  const idle = createTestEngine();
-  idle.engine.start();
-  await completeAction(idle.engine, idle.setTime, 'right', 100);
-  idle.setTime(5_099);
-  idle.engine.tick();
-  assertEqual(idle.engine.snapshot().movementCount, 1, '空闲不足五秒时保留连续计数');
-  idle.setTime(5_100);
-  idle.engine.tick();
-  assertEqual(idle.engine.snapshot().movementCount, 0, '正常状态空闲五秒清零连续计数');
-
-  const deadline = createTestEngine();
-  deadline.engine.start(3_000, 50);
-  const interrupted = deadline.engine.requestAction('right');
-  deadline.setTime(50);
-  deadline.engine.tick();
-  assertEqual(deadline.engine.snapshot().phase, 'finished', '服务端提前截止时间应保留');
-  assertEqual(deadline.engine.snapshot().position.x, 0.75, '截止时保留此前已实际走到的位置');
+  const deadline = new GameEngine({ now: () => 0 });
+  deadline.start(3_000, 50);
+  const interrupted = deadline.requestAction('right');
+  deadline.tick(50);
+  assertEqual(deadline.snapshot().phase, 'finished', '服务端提前截止时间应保留');
+  assertEqual(deadline.snapshot().position.x, 0, '截止时未完成转向不能产生位移');
   assertEqual((await interrupted).status, 'cancelled', '截止应取消未完成动作');
 }

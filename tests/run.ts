@@ -3,13 +3,18 @@ import { readFile } from 'node:fs/promises';
 import vm from 'node:vm';
 import { runSelfTest } from '../web/src/game/game-engine.test.ts';
 import { validTool } from '../shared/tools.ts';
+import { testChatSkills } from './chat-skills.test.ts';
 
 await runSelfTest();
+await testChatSkills();
 assert.equal(validTool('self.niuqiqi.do_action', { action: 'left', steps: 3 }), true);
 assert.equal(validTool('self.niuqiqi.do_action', { action: 'shell', steps: 1 }), false);
-assert.equal(validTool('self.niuqiqi.do_action', { action: 'left', steps: 4 }), true);
+assert.equal(validTool('self.niuqiqi.do_action', { action: 'left', steps: 4 }), false);
 assert.equal(validTool('self.niuqiqi.do_action', { action: 'left', steps: 0 }), false);
 assert.equal(validTool('self.niuqiqi.do_action', { action: 'spin', steps: 2 }), false);
+assert.equal(validTool('self.niuqiqi.do_action', { action: 'somersault' }), true);
+assert.equal(validTool('self.niuqiqi.do_action', { action: 'somersault', steps: 2 }), false);
+assert.equal(validTool('self.niuqiqi.do_action', { action: 'dance' }), true);
 assert.equal(validTool('self.niuqiqi.get_status', { coordinates: true }), false);
 assert.equal(validTool('self.niuqiqi.start_apple_game', {}), true);
 assert.equal(validTool('self.niuqiqi.exit_apple_game', {}), true);
@@ -59,4 +64,4 @@ async function testVadTransition(): Promise<void> {
   assert(frames.some((frame) => !frame.speech));
 }
 await testVadTransition();
-console.info('Game rules, tool validation and PCM resampling tests passed');
+console.info('Game rules, chat skills, tool validation and PCM resampling tests passed');

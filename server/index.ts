@@ -5,7 +5,7 @@ import { readFile, writeFile } from 'node:fs/promises';
 import { resolve, extname, sep } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { WebSocket, WebSocketServer } from 'ws';
-import { tools, validTool } from '../shared/tools.ts';
+import { tools, validTool, canPerformAction } from '../shared/tools.ts';
 
 type Message = Record<string, any>;
 const agentId = process.env.LINX_AGENT_ID?.trim();
@@ -238,9 +238,12 @@ export function attachGateway(http: import('node:http').Server | import('node:ht
           mode = 'chat';
           deadline = 0;
           send({ type: 'mode', mode });
-        } else if (toolName === 'self.niuqiqi.do_action' && (mode !== 'apple-game' || !roundId || Date.now() >= deadline)) {
-          return toolResult(key, 'Game is not running', true);
+        } else if (toolName === 'self.niuqiqi.do_action') {
+          if (!canPerformAction(mode, args.action)) return toolResult(key, 'Action is unavailable in the current mode', true);
+          if (mode === 'apple-game' && (!roundId || Date.now() >= deadline)) return toolResult(key, 'Game is not running', true);
         }
+        // 最长舞蹈约 8.17 秒，保留传输余量，避免六秒时误取消。
+        const toolTimeoutMs = toolName === 'self.niuqiqi.do_action' && mode === 'chat' && args.action === 'dance' ? 12000 : 6000;
         pending.get(key)!.timer = setTimeout(() => {
           toolResult(key, 'Tool execution timed out', true);
           send({ type: 'cancel', requestId: key, roundId });
@@ -250,7 +253,7 @@ export function attachGateway(http: import('node:http').Server | import('node:ht
             clearTimeout(roundTimer);
             send({ type: 'mode', mode });
           }
-        }, 6000);
+        }, toolTimeoutMs);
         send({ type: 'tool', requestId: key, roundId, name: payload.params.name, args });
       } else if (payload.method !== undefined) {
         toLinx({ type: 'mcp', payload: { jsonrpc: '2.0', id, error: { code: -32601, message: 'Method not found' } } });

@@ -1,5 +1,6 @@
 import {
   ActionName,
+  ActionPhase,
   ActionResult,
   AppleState,
   DEFAULT_GAME_CONFIG,
@@ -9,6 +10,7 @@ import {
   GameEventListener,
   GamePhase,
   GameSnapshot,
+  Heading,
   Position,
 } from './types';
 
@@ -27,6 +29,8 @@ interface PendingAction {
   stepsCompleted: number;
   touchedBoundary: boolean;
   collected: number;
+  phase: ActionPhase | null;
+  targetHeading: Heading;
 }
 
 interface TimelineEvent {
@@ -53,6 +57,7 @@ export class GameEngine {
   private phase: GamePhase = 'ready';
   private score = 0;
   private movementCount = 0;
+  private heading: Heading = 'front';
   private fatigued = false;
   private fatigueUntil: number | null = null;
   private idleSince: number | null = null;
@@ -115,6 +120,11 @@ export class GameEngine {
       fatigued: this.fatigued,
       movementCount: this.movementCount,
       currentAction: this.currentAction?.action ?? null,
+      actionPhase: this.currentAction?.phase ?? null,
+      actionProgress: this.currentAction?.startedAt != null && this.currentAction.dueAt != null
+        ? Math.max(0, Math.min(1, (this.lastTime - this.currentAction.startedAt) / (this.currentAction.dueAt - this.currentAction.startedAt))) : 0,
+      heading: this.heading,
+      targetHeading: this.currentAction?.targetHeading ?? null,
       queuedActions: this.queue.length,
       startedAt: this.startedAt,
       endsAt: this.endsAt,
@@ -149,7 +159,7 @@ export class GameEngine {
   public requestAction(action: ActionName, steps = 1): Promise<ActionResult> {
     const at = this.now();
     this.tick(at);
-    if (!['left', 'right', 'forward', 'backward', 'spin', 'stop'].includes(action)) {
+    if (!['left', 'right', 'forward', 'backward', 'spin', 'somersault', 'stop'].includes(action)) {
       return Promise.resolve(this.rejectedResult(action, 'invalid_action'));
     }
     if (this.phase !== 'running') {
@@ -159,11 +169,11 @@ export class GameEngine {
       this.stop();
       return Promise.resolve(this.completedResult('stop', 0, false, 0));
     }
-    if (!Number.isInteger(steps) || steps < 1) {
-      return Promise.resolve(this.rejectedResult(action, 'steps_must_be_positive_integer'));
+    if (!Number.isInteger(steps) || steps < 1 || steps > 3) {
+      return Promise.resolve(this.rejectedResult(action, 'steps_must_be_between_1_and_3'));
     }
-    if (action === 'spin' && steps !== 1) {
-      return Promise.resolve(this.rejectedResult(action, 'spin_accepts_one_step'));
+    if (['spin', 'somersault'].includes(action) && steps !== 1) {
+      return Promise.resolve(this.rejectedResult(action, 'skill_accepts_one_step'));
     }
     if (this.queue.length + (this.currentAction ? 1 : 0) >= 2) {
       return Promise.resolve(this.rejectedResult(action, 'action_queue_full'));
@@ -180,6 +190,8 @@ export class GameEngine {
         stepsCompleted: 0,
         touchedBoundary: false,
         collected: 0,
+        phase: null,
+        targetHeading: this.heading,
       };
       this.queue.push(pending);
       this.emit('action_queued', this.lastTime, { action, steps: pending.steps });
@@ -242,6 +254,7 @@ export class GameEngine {
     this.fatigueUntil = null;
     this.idleSince = null;
     this.position = { ...this.initialPosition };
+    this.heading = 'front';
   }
 
   /** 在指定时刻生成一个不与现有苹果重叠的苹果。 */
@@ -292,6 +305,22 @@ export class GameEngine {
     const value = this.random();
     const normalized = Number.isFinite(value) ? Math.min(1, Math.max(0, value)) : 0.5;
     return min + (max - min) * normalized;
+  }
+
+  /** 将方向动作映射为行走时的目标朝向。 */
+  private headingForAction(action: ActionName): Heading {
+    if (action === 'left') return 'left';
+    if (action === 'right') return 'right';
+    if (action === 'backward') return 'back';
+    return 'front';
+  }
+
+  /** 计算两个朝向之间的最短转向时间，90 度约 300 毫秒。 */
+  private turnDurationMs(from: Heading, to: Heading): number {
+    const angles: Record<Heading, number> = { front: 0, right: 90, back: 180, left: 270 };
+    const delta = Math.abs(angles[from] - angles[to]);
+    const degrees = Math.min(delta, 360 - delta);
+    return Math.max(150, Math.round(degrees / 90 * 300));
   }
 
   /** 按时间顺序处理所有到期、补位和动作完成事件。 */
@@ -357,7 +386,7 @@ export class GameEngine {
     const pending = this.queue.shift()!;
     this.currentAction = pending;
     this.idleSince = null;
-    this.prepareStep(pending, at);
+    this.prepareActionPhase(pending, at);
     this.emit('action_started', at, { action: pending.action, steps: pending.steps });
   }
 
@@ -365,29 +394,98 @@ export class GameEngine {
   private completeActionStep(at: number): void {
     const pending = this.currentAction;
     if (!pending) return;
-    if (pending.action === 'spin') {
-      pending.stepsCompleted = 1;
-    } else {
-      pending.stepsCompleted += 1;
-      this.emit('action_step', at, { action: pending.action, position: { ...this.position }, touchedBoundary: pending.touchedBoundary, collected: pending.collected });
-    }
-    this.completeMovementAction(at);
-    if (pending.stepsCompleted < pending.steps && !pending.touchedBoundary) {
-      this.prepareStep(pending, at);
+    if (pending.phase === 'turn') {
+      this.heading = pending.targetHeading;
+      if (pending.action === 'spin' || pending.action === 'somersault') {
+        this.prepareActionPhase(pending, at);
+      } else {
+        this.prepareStep(pending, at);
+      }
       return;
     }
+    if (pending.phase === 'face_front') {
+      this.heading = 'front';
+      this.completeFinalAction(pending, at);
+      return;
+    }
+    if (pending.phase === 'spin') {
+      pending.stepsCompleted = 1;
+      this.heading = 'front';
+      this.completeMovementAction(at);
+      this.completeFinalAction(pending, at);
+      return;
+    }
+    if (pending.phase === 'somersault') {
+      pending.stepsCompleted = 1;
+      this.heading = 'front';
+      this.completeMovementAction(at);
+      this.completeFinalAction(pending, at);
+      return;
+    }
+    if (pending.phase === 'walk') {
+      pending.stepsCompleted += 1;
+      this.emit('action_step', at, { action: pending.action, position: { ...this.position }, touchedBoundary: pending.touchedBoundary, collected: pending.collected });
+      this.completeMovementAction(at);
+      if (pending.stepsCompleted < pending.steps && !pending.touchedBoundary) {
+        this.prepareStep(pending, at);
+        return;
+      }
+      if (this.heading !== 'front') {
+        pending.phase = 'face_front';
+        pending.startedAt = at;
+        pending.dueAt = at + this.turnDurationMs(this.heading, 'front');
+        return;
+      }
+      this.completeFinalAction(pending, at);
+    }
+  }
+
+  /** 进入一个动作的第一个阶段，方向动作先转向，技能动作直接执行。 */
+  private prepareActionPhase(pending: PendingAction, at: number): void {
+    if (pending.action === 'spin') {
+      pending.phase = 'spin';
+      pending.startedAt = at;
+      pending.dueAt = at + this.config.spinDurationMs;
+      return;
+    }
+    if (pending.action === 'somersault') {
+      pending.phase = 'somersault';
+      pending.startedAt = at;
+      pending.dueAt = at + this.config.somersaultDurationMs;
+      return;
+    }
+    const target = this.headingForAction(pending.action);
+    pending.targetHeading = target;
+    if (this.heading !== target) {
+      pending.phase = 'turn';
+      pending.startedAt = at;
+      pending.dueAt = at + this.turnDurationMs(this.heading, target);
+      return;
+    }
+    this.prepareStep(pending, at);
+  }
+
+  /** 完成所有转向、行走或技能阶段，并解析一次动作结果。 */
+  private completeFinalAction(pending: PendingAction, at: number): void {
     this.currentAction = null;
     this.idleSince = at;
-    this.emit('action_completed', at, { action: pending.action, steps: pending.stepsCompleted, collected: pending.collected });
+    this.emit('action_completed', at, {
+      action: pending.action,
+      phase: pending.phase,
+      heading: this.heading,
+      steps: pending.stepsCompleted,
+      collected: pending.collected,
+    });
     pending.resolve(this.completedResult(pending.action, pending.stepsCompleted, pending.touchedBoundary, pending.collected));
     this.startNextAction(at);
   }
 
   /** 保存当前小步的起终点与时长，后续按绝对时间插值。 */
   private prepareStep(pending: PendingAction, at: number): void {
+    pending.phase = 'walk';
     pending.startedAt = at;
     pending.stepStart = { ...this.position };
-    pending.dueAt = at + (pending.action === 'spin' ? this.config.spinDurationMs : this.config.stepDurationMs);
+    pending.dueAt = at + this.config.stepDurationMs;
     const direction = pending.action === 'left' ? { x: -1, z: 0 } : pending.action === 'right' ? { x: 1, z: 0 } : pending.action === 'forward' ? { x: 0, z: 1 } : pending.action === 'backward' ? { x: 0, z: -1 } : { x: 0, z: 0 };
     const intended = { x: this.position.x + direction.x * this.config.stepDistance, z: this.position.z + direction.z * this.config.stepDistance };
     pending.stepTarget = this.clampPosition(intended);
@@ -397,7 +495,7 @@ export class GameEngine {
   /** 将牛推进到当前小步中对应的连续位置。 */
   private advancePosition(at: number): void {
     const pending = this.currentAction;
-    if (!pending || pending.startedAt === null || pending.dueAt === null) return;
+    if (!pending || pending.phase !== 'walk' || pending.startedAt === null || pending.dueAt === null) return;
     const ratio = Math.min(1, Math.max(0, (at - pending.startedAt) / (pending.dueAt - pending.startedAt)));
     this.position = {
       x: pending.stepStart.x + (pending.stepTarget.x - pending.stepStart.x) * ratio,
@@ -408,7 +506,7 @@ export class GameEngine {
   /** 解线段与抓取圆的首次交点，换算为真实接触时刻。 */
   private contactTime(apple: AppleState): number | null {
     const pending = this.currentAction;
-    if (!pending || pending.startedAt === null || pending.dueAt === null) return null;
+    if (!pending || pending.phase !== 'walk' || pending.startedAt === null || pending.dueAt === null) return null;
     const dx = pending.stepTarget.x - pending.stepStart.x;
     const dz = pending.stepTarget.z - pending.stepStart.z;
     const lengthSquared = dx * dx + dz * dz;
@@ -489,7 +587,7 @@ export class GameEngine {
   /** 创建完成结果并带上最新快照数据。 */
   private completedResult(action: ActionName, stepsCompleted: number, touchedBoundary: boolean, collected: number): ActionResult {
     const snapshot = this.snapshot();
-    return { status: 'completed', action, stepsCompleted, touchedBoundary, collected, score: snapshot.score, fatigued: snapshot.fatigued, remainingMs: snapshot.remainingMs };
+    return { status: 'completed', action, stepsCompleted, touchedBoundary, collected, score: snapshot.score, fatigued: snapshot.fatigued, heading: snapshot.heading, remainingMs: snapshot.remainingMs };
   }
 
   /** 创建取消结果并带上取消原因。 */
