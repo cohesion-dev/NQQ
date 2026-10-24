@@ -1,3 +1,5 @@
+import { CIRCLE_DURATION_SECONDS } from '../../../shared/circle-motion';
+
 /** 地面坐标使用 x/z，三维垂直方向保留为 y。 */
 export interface Position {
   x: number;
@@ -11,7 +13,14 @@ export type ActionName =
   | 'forward'
   | 'backward'
   | 'spin'
+  | 'somersault'
   | 'stop';
+
+/** 牛完成动作后默认面向的固定前方，以及动作中间的朝向。 */
+export type Heading = 'front' | 'left' | 'back' | 'right';
+
+/** 复合动作当前执行阶段。 */
+export type ActionPhase = 'turn' | 'walk' | 'face_front' | 'spin' | 'somersault';
 
 /** 游戏生命周期。 */
 export type GamePhase = 'ready' | 'running' | 'finished';
@@ -25,6 +34,7 @@ export interface GameConfig {
   stepDistance: number;
   stepDurationMs: number;
   spinDurationMs: number;
+  somersaultDurationMs: number;
   fatigueAfterActions: number;
   fatigueDurationMs: number;
   appleCollisionRadius: number;
@@ -54,6 +64,11 @@ export interface GameSnapshot {
   fatigued: boolean;
   movementCount: number;
   currentAction: ActionName | null;
+  actionPhase: ActionPhase | null;
+  /** 当前动作阶段的完成比例，供模型动画同步采样。 */
+  actionProgress: number;
+  heading: Heading;
+  targetHeading: Heading | null;
   queuedActions: number;
   startedAt: number | null;
   endsAt: number | null;
@@ -89,6 +104,7 @@ export interface ActionResult {
   collected: number;
   score: number;
   fatigued: boolean;
+  heading: Heading;
   remainingMs: number;
 }
 
@@ -105,13 +121,14 @@ export interface GameEngineOptions {
 
 /** 默认规则常量。 */
 export const DEFAULT_GAME_CONFIG: GameConfig = {
-  gameDurationMs: 60_000,
-  appleLifespanMs: 10_000,
+  gameDurationMs: 180_000,
+  appleLifespanMs: 60_000,
   appleRespawnDelayMs: 1_000,
   maxApples: 2,
   stepDistance: 1,
   stepDurationMs: 600,
-  spinDurationMs: 1_400,
+  spinDurationMs: CIRCLE_DURATION_SECONDS * 1_000,
+  somersaultDurationMs: 1_800,
   fatigueAfterActions: 3,
   fatigueDurationMs: 5_000,
   appleCollisionRadius: 0.8,

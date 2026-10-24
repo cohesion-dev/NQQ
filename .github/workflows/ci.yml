@@ -1,0 +1,64 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+# 同一分支的新提交会取消上一次未完成的运行。
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: 类型检查与测试
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v7
+
+      - name: 安装 Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: 安装依赖
+        run: npm ci
+
+      - name: 类型检查
+        run: npm run typecheck
+
+      - name: 规则与工具校验测试
+        run: npm test
+
+      - name: 构建
+        run: npm run build
+
+      - name: 安装浏览器
+        run: npx playwright install --with-deps chromium
+
+      - name: 启动开发服务器
+        run: |
+          npm run dev > /tmp/dev-server.log 2>&1 &
+          for attempt in {1..60}; do
+            if curl -fsS http://127.0.0.1:5173/ > /dev/null; then break; fi
+            sleep 1
+          done
+          curl -fsS http://127.0.0.1:5173/ > /dev/null
+
+      - name: 浏览器检查
+        run: npm run test:browser
+
+      - name: 上传截图
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: test-results
+          path: test-results/
+          if-no-files-found: ignore

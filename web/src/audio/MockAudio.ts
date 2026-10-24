@@ -7,15 +7,15 @@ export class MockAudio {
   get speaking(): boolean { return this.current !== null && window.speechSynthesis?.speaking; }
 
   /** 播放本地模拟语音，并在播放前停止上一段回复。 */
-  speak(text: string, interrupt = true): void {
+  speak(text: string, interrupt = true, onEnd: () => void = () => {}): void {
     if (interrupt) this.stop();
-    if (!('speechSynthesis' in window)) return;
+    if (!('speechSynthesis' in window)) { onEnd(); return; }
     const utterance = new SpeechSynthesisUtterance(text);
     utterance.lang = 'zh-CN';
     utterance.rate = 1.08;
     utterance.pitch = 1.1;
-    utterance.onend = () => { if (this.current === utterance) this.current = null; };
-    utterance.onerror = () => { if (this.current === utterance) this.current = null; };
+    utterance.onend = () => { if (this.current === utterance) this.current = null; onEnd(); };
+    utterance.onerror = () => { if (this.current === utterance) this.current = null; onEnd(); };
     this.current = utterance;
     window.speechSynthesis.speak(utterance);
   }

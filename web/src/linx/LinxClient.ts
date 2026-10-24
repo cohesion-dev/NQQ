@@ -35,18 +35,15 @@ export class LinxClient {
     });
   }
 
-  /** 请求服务端固定截止时间，收到 round 事件后才启动本地本局。 */
-  startRound(): void { this.send({ type: 'start' }); }
-
   /** 发送与当前本局绑定的控制消息。 */
   send(message: LinxMessage): void {
     if (this.socket?.readyState !== WebSocket.OPEN || !this.ready) return;
     this.socket.send(JSON.stringify({ roundId: this.roundId, ...message }));
   }
 
-  /** 上传分帧后的单声道未压缩音频。 */
+  /** 上传聊天或游戏模式的单声道未压缩音频。 */
   sendAudio(frame: ArrayBuffer): void {
-    if (this.ready && this.roundId && this.socket?.readyState === WebSocket.OPEN) this.socket.send(frame);
+    if (this.ready && this.socket?.readyState === WebSocket.OPEN) this.socket.send(frame);
   }
 
   /** 主动关闭连接，旧连接的关闭事件不能覆盖新连接。 */
