@@ -242,8 +242,9 @@ export function attachGateway(http: import('node:http').Server | import('node:ht
           if (!canPerformAction(mode, args.action)) return toolResult(key, 'Action is unavailable in the current mode', true);
           if (mode === 'apple-game' && (!roundId || Date.now() >= deadline)) return toolResult(key, 'Game is not running', true);
         }
-        // 最长舞蹈约 8.17 秒，保留传输余量，避免六秒时误取消。
-        const toolTimeoutMs = toolName === 'self.niuqiqi.do_action' && mode === 'chat' && args.action === 'dance' ? 12000 : 6000;
+        // 舞蹈约 8.17 秒，游戏队列最多两次 4.2 秒绕圈，保留传输余量。
+        const toolTimeoutMs = toolName === 'self.niuqiqi.do_action'
+          ? mode === 'apple-game' ? 10000 : args.action === 'dance' ? 12000 : 6000 : 6000;
         pending.get(key)!.timer = setTimeout(() => {
           toolResult(key, 'Tool execution timed out', true);
           send({ type: 'cancel', requestId: key, roundId });

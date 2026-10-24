@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import type { ChatSkill } from '../../../shared/tools';
-import { CIRCLE_DURATION_SECONDS, sampleCircleMotion } from './circle-motion';
+import { CIRCLE_DURATION_SECONDS, sampleCircleMotion } from '../../../shared/circle-motion';
 
 export interface ChatSkillResult {
   status: 'completed' | 'cancelled' | 'rejected';

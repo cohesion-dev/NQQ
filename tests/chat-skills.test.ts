@@ -4,7 +4,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { canPerformAction, chatSkills } from '../shared/tools.ts';
 import { ChatSkillPlayer } from '../web/src/scene/ChatSkillPlayer.ts';
-import { CIRCLE_DURATION_SECONDS, sampleCircleMotion } from '../web/src/scene/circle-motion.ts';
+import { CIRCLE_DURATION_SECONDS, sampleCircleMotion } from '../shared/circle-motion.ts';
 import { WalkCycle } from '../web/src/scene/WalkCycle.ts';
 import { DANCE_CLIPS, ModelRig, SceneView, toSceneSnapshot } from '../web/src/scene/SceneView.ts';
 import { ChatIdleTimer } from '../web/src/scene/ChatIdleTimer.ts';
@@ -97,6 +97,10 @@ export async function testChatSkills(): Promise<void> {
     rig.update(0.2);
     assertRotation(upperLeg.quaternion, clipRotation(tired ? 'Walking' : 'Running', 0.2), 'Fatigue and recovery switch the actual movement clip');
   }
+  rig.setSnapshot({ ...idle, pose: 'spin', rotation: Math.PI * 1.5, actionProgress: 0.5 });
+  rig.update(0.2);
+  assertRotation(upperLeg.quaternion, clipRotation('Walking', 0.2), 'Game spin must walk rather than run or rotate in place');
+  assert.equal(rig.group.rotation.y, Math.PI * 1.5);
   rig.setSnapshot({ ...idle, tired: true });
   rig.update(0.2);
   assert(upperLeg.quaternion.angleTo(restUpper) < 1e-6, 'A tired stationary cow must not walk in place');

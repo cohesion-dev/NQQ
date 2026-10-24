@@ -1,3 +1,5 @@
+import { CIRCLE_DURATION_SECONDS } from '../../../shared/circle-motion';
+
 /** 地面坐标使用 x/z，三维垂直方向保留为 y。 */
 export interface Position {
   x: number;
@@ -125,7 +127,7 @@ export const DEFAULT_GAME_CONFIG: GameConfig = {
   maxApples: 2,
   stepDistance: 1,
   stepDurationMs: 600,
-  spinDurationMs: 1_400,
+  spinDurationMs: CIRCLE_DURATION_SECONDS * 1_000,
   somersaultDurationMs: 1_800,
   fatigueAfterActions: 3,
   fatigueDurationMs: 5_000,

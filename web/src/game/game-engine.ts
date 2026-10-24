@@ -13,6 +13,8 @@ import {
   Heading,
   Position,
 } from './types';
+import { CIRCLE_DURATION_SECONDS, sampleCircleMotion } from '../../../shared/circle-motion';
+import { firstCircleBoundaryProgress, firstCircleContactProgress } from './circle-path';
 
 interface PendingRespawn {
   dueAt: number;
@@ -122,7 +124,8 @@ export class GameEngine {
       currentAction: this.currentAction?.action ?? null,
       actionPhase: this.currentAction?.phase ?? null,
       actionProgress: this.currentAction?.startedAt != null && this.currentAction.dueAt != null
-        ? Math.max(0, Math.min(1, (this.lastTime - this.currentAction.startedAt) / (this.currentAction.dueAt - this.currentAction.startedAt))) : 0,
+        ? Math.max(0, Math.min(1, (this.lastTime - this.currentAction.startedAt) / (this.currentAction.phase === 'spin'
+          ? this.config.spinDurationMs : this.currentAction.dueAt - this.currentAction.startedAt))) : 0,
       heading: this.heading,
       targetHeading: this.currentAction?.targetHeading ?? null,
       queuedActions: this.queue.length,
@@ -445,7 +448,10 @@ export class GameEngine {
     if (pending.action === 'spin') {
       pending.phase = 'spin';
       pending.startedAt = at;
-      pending.dueAt = at + this.config.spinDurationMs;
+      pending.stepStart = { ...this.position };
+      const boundary = firstCircleBoundaryProgress(pending.stepStart, this.config.bounds);
+      pending.touchedBoundary = boundary !== null;
+      pending.dueAt = at + this.config.spinDurationMs * (boundary ?? 1);
       return;
     }
     if (pending.action === 'somersault') {
@@ -492,10 +498,16 @@ export class GameEngine {
     pending.touchedBoundary ||= pending.stepTarget.x !== intended.x || pending.stepTarget.z !== intended.z;
   }
 
-  /** 将牛推进到当前小步中对应的连续位置。 */
+  /** 按规则时间推进直线或圆周位置，碰撞和画面读取同一份坐标。 */
   private advancePosition(at: number): void {
     const pending = this.currentAction;
-    if (!pending || pending.phase !== 'walk' || pending.startedAt === null || pending.dueAt === null) return;
+    if (!pending || pending.startedAt === null || pending.dueAt === null) return;
+    if (pending.phase === 'spin') {
+      const motion = sampleCircleMotion((at - pending.startedAt) / this.config.spinDurationMs * CIRCLE_DURATION_SECONDS);
+      this.position = this.clampPosition({ x: pending.stepStart.x + motion.x, z: pending.stepStart.z + motion.z });
+      return;
+    }
+    if (pending.phase !== 'walk') return;
     const ratio = Math.min(1, Math.max(0, (at - pending.startedAt) / (pending.dueAt - pending.startedAt)));
     this.position = {
       x: pending.stepStart.x + (pending.stepTarget.x - pending.stepStart.x) * ratio,
@@ -503,10 +515,18 @@ export class GameEngine {
     };
   }
 
-  /** 解线段与抓取圆的首次交点，换算为真实接触时刻。 */
+  /** 求直线或圆弧与抓取范围的首次交点，苹果过期时不再计分。 */
   private contactTime(apple: AppleState): number | null {
     const pending = this.currentAction;
-    if (!pending || pending.phase !== 'walk' || pending.startedAt === null || pending.dueAt === null) return null;
+    if (!pending || pending.startedAt === null || pending.dueAt === null) return null;
+    if (pending.phase === 'spin') {
+      const from = (Math.max(this.lastTime, apple.spawnedAt, pending.startedAt) - pending.startedAt) / this.config.spinDurationMs;
+      const progress = firstCircleContactProgress(pending.stepStart, apple.position, this.config.appleCollisionRadius, from);
+      if (progress === null) return null;
+      const at = pending.startedAt + progress * this.config.spinDurationMs;
+      return at <= pending.dueAt && at < apple.expiresAt ? at : null;
+    }
+    if (pending.phase !== 'walk') return null;
     const dx = pending.stepTarget.x - pending.stepStart.x;
     const dz = pending.stepTarget.z - pending.stepStart.z;
     const lengthSquared = dx * dx + dz * dz;

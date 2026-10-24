@@ -20,7 +20,7 @@ export const tools = [
   },
   {
     name: 'self.niuqiqi.do_action',
-    description: '聊天模式允许 spin 围绕身旁中心点走一圈（约4.2秒，结束回到起点并面向前方）、somersault 原地翻跟头、dance 原地跳舞和 stop 停止，不需开始游戏。游戏模式允许 left/right/forward/backward 移动、spin、somersault 和 stop。移动会先转向、行走、最后回正；方向按画面判断。工具实际完成后才返回结果。',
+    description: '聊天模式允许 spin、somersault 原地翻跟头、dance 原地跳舞和 stop 停止，不需开始游戏。游戏模式允许 left/right/forward/backward 移动、spin、somersault 和 stop。两种模式的 spin 都是围绕身旁中心点走一圈（约4.2秒，结束回到起点并面向前方），游戏中会抓取沿途苹果，触边提前结束。移动会先转向、行走、最后回正；方向按画面判断。工具实际完成后才返回结果。',
     inputSchema: {
       type: 'object', properties: {
         action: { type: 'string', enum: actions },

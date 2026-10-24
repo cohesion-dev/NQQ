@@ -79,6 +79,12 @@ try {
   await page.clock.runFor(3000);
   assert.equal(results.some((message) => message.requestId === 'move-1'), true);
 
+  socket.send(JSON.stringify({ type: 'tool', requestId: 'game-spin', roundId: gameRoundId, name: 'self.niuqiqi.do_action', args: { action: 'spin' } }));
+  await page.clock.runFor(2100);
+  assert.equal(results.some((message) => message.requestId === 'game-spin'), false);
+  await page.clock.runFor(2400);
+  assert.equal(results.find((message) => message.requestId === 'game-spin')?.result.status, 'completed');
+
   socket.send(JSON.stringify({ type: 'reply', roundId: gameRoundId, mode: 'apple-game', text: '好的' }));
   // 权限提示先于回复出现，因此断言最后一条对话。
   await page.waitForFunction(() => {

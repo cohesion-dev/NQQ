@@ -3,6 +3,7 @@ import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { ChatSkillPlayer, type ChatClipPlayback, type ChatSkillResult } from './ChatSkillPlayer';
 import { WalkCycle } from './WalkCycle';
 import type { ChatSkill } from '../../../shared/tools';
+import { CIRCLE_DURATION_SECONDS, sampleCircleMotion } from '../../../shared/circle-motion';
 import type { SceneSnapshot, SceneViewApi, SceneViewOptions } from './types';
 
 const DEFAULT_BACKGROUND = 0xaed8f2;
@@ -378,6 +379,7 @@ interface GameEventLike {
 export function toSceneSnapshot(snapshot: GameSnapshotLike): SceneSnapshot {
   const angles = { front: 0, right: Math.PI / 2, back: Math.PI, left: -Math.PI / 2 };
   const headingRotation = angles[snapshot.heading];
+  const circle = snapshot.actionPhase === 'spin' ? sampleCircleMotion(snapshot.actionProgress * CIRCLE_DURATION_SECONDS) : null;
   const turning = snapshot.actionPhase === 'turn' || snapshot.actionPhase === 'face_front';
   const targetRotation = snapshot.actionPhase === 'face_front' ? 0 : angles[snapshot.targetHeading ?? snapshot.heading];
   let turnAngle = Math.atan2(Math.sin(targetRotation - headingRotation), Math.cos(targetRotation - headingRotation));
@@ -391,7 +393,7 @@ export function toSceneSnapshot(snapshot: GameSnapshotLike): SceneSnapshot {
     phase: snapshot.phase === 'finished' ? 'result' : snapshot.phase,
     cow: {
       x: snapshot.position.x, z: snapshot.position.z,
-      rotation: headingRotation + (turning ? turnAngle * snapshot.actionProgress : 0),
+      rotation: circle?.rotation ?? headingRotation + (turning ? turnAngle * snapshot.actionProgress : 0),
       pose, tired: snapshot.fatigued, actionProgress: snapshot.actionProgress,
       turnSteps: turning ? Math.max(1, Math.round(Math.abs(turnAngle) / (Math.PI / 2))) : 1,
     },
@@ -417,7 +419,6 @@ class CowRig {
   private pose: SceneSnapshot['cow']['pose'] = 'idle';
   private tired = false;
   private target = { x: 0, z: 0, rotation: 0 };
-  private spinRotation = 0;
   private chatWalking = false;
 
   /** 构建牛身、头部、四肢、眼罩、口袋和尾巴。 */
@@ -525,11 +526,9 @@ class CowRig {
 
   /** 更新移动插值和占位动作的轻量姿态。 */
   update(delta: number, elapsed: number, speechAmplitude: number): void {
-    this.group.position.x = THREE.MathUtils.damp(this.group.position.x, this.target.x, 8, delta);
-    this.group.position.z = THREE.MathUtils.damp(this.group.position.z, this.target.z, 8, delta);
-    if (this.pose === 'spin') this.spinRotation += delta * Math.PI * 2 / 1.4;
-    else this.spinRotation = 0;
-    this.group.rotation.y = this.target.rotation + this.spinRotation;
+    this.group.position.x = this.pose === 'spin' ? this.target.x : THREE.MathUtils.damp(this.group.position.x, this.target.x, 8, delta);
+    this.group.position.z = this.pose === 'spin' ? this.target.z : THREE.MathUtils.damp(this.group.position.z, this.target.z, 8, delta);
+    this.group.rotation.y = this.target.rotation;
     const breathing = Math.sin(elapsed * 2.4) * 0.02;
     this.body.position.y = 1.45 + breathing;
     this.applyPose(elapsed);
@@ -538,7 +537,7 @@ class CowRig {
 
   /** 将动作名称映射到可观察的程序化姿态，等待正式动作资源替换。 */
   private applyPose(elapsed: number): void {
-    const moving = this.chatWalking || this.pose === 'walk' || this.pose.startsWith('turn_');
+    const moving = this.chatWalking || this.pose === 'spin' || this.pose === 'walk' || this.pose.startsWith('turn_');
     const walk = moving ? Math.sin(elapsed * 10) * 0.32 : 0;
     this.legs[0].rotation.x = walk;
     this.legs[1].rotation.x = -walk;
@@ -758,6 +757,7 @@ export class ModelRig {
     const mapping: Record<string, string> = {
       walk: 'walking',
       run: 'running',
+      spin: 'walking',
       turn_left: 'idle_turn_left',
       turn_right: 'idle_turn_right',
       turn_back: 'idle_turn_left',
