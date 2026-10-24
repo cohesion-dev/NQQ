@@ -35,16 +35,16 @@ async function completeAction(engine: GameEngine, setTime: (value: number) => vo
   return resultPromise;
 }
 
-/** 覆盖苹果生命周期、移动碰撞、疲惫、停止和一分钟结算。 */
+/** 覆盖苹果生命周期、移动碰撞、疲惫、停止和三分钟结算。 */
 export async function runSelfTest(): Promise<void> {
   const { engine, setTime } = createTestEngine();
   const events: GameEvent[] = [];
   engine.subscribe((_snapshot, batch) => events.push(...batch));
 
   // 固定三秒样例用于验证既有生命周期边界，与默认寿命分开。
-  engine.start(3000);
+  engine.start(3000, 60_000);
   assertEqual(engine.snapshot().apples.length, 2, '游戏开始应生成两颗苹果');
-  assertEqual(engine.snapshot().remainingMs, 60_000, '游戏开始时长应为一分钟');
+  assertEqual(engine.snapshot().remainingMs, 60_000, '测试截止时间应覆盖一局剩余时长');
 
   const firstMove = await completeAction(engine, setTime, 'left', 300, 3);
   assertEqual(firstMove.status, 'completed', '移动动作应完成');
@@ -91,7 +91,7 @@ export async function runSelfTest(): Promise<void> {
 
   setTime(60_000);
   engine.tick(60_000);
-  assertEqual(engine.snapshot().phase, 'finished', '到达一分钟应结束游戏');
+  assertEqual(engine.snapshot().phase, 'finished', '到达测试截止时间应结束游戏');
   const afterEnd = await engine.requestAction('left');
   assertEqual(afterEnd.status, 'rejected', '结束后动作应被拒绝');
   assertEqual(engine.snapshot().remainingMs, 0, '结束后剩余时间应为零');
@@ -111,12 +111,16 @@ export async function runSelfTest(): Promise<void> {
 
   const boundsTest = createTestEngine();
   boundsTest.engine.start();
+  assertEqual(boundsTest.engine.snapshot().endsAt, 180_000, '默认游戏时长应为三分钟');
+  assertEqual(boundsTest.engine.snapshot().apples[0].expiresAt, 60_000, '默认苹果有效期应为一分钟');
   const boundsResult = await completeAction(boundsTest.engine, boundsTest.setTime, 'left', 300, 3);
   boundsTest.setTime(300);
-  const boundaryPromise = boundsTest.engine.requestAction('left', 3);
+  const boundaryPromise = boundsTest.engine.requestAction('left', 999);
   boundsTest.setTime(600);
   boundsTest.engine.tick(600);
-  assertEqual((await boundaryPromise).touchedBoundary, true, '移动触边应通过结果报告');
+  const boundaryResult = await boundaryPromise;
+  assertEqual(boundaryResult.touchedBoundary, true, '移动触边应通过结果报告');
+  assertEqual(boundaryResult.stepsCompleted, 1, '触边后应提前结束任意步数动作');
   assertEqual(boundsTest.engine.snapshot().position.x, -5, '移动不能越过场地边界');
   assertEqual(boundsResult.collected, 1, '路径碰撞应只抓取一次');
 

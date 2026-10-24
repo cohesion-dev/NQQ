@@ -105,8 +105,8 @@ export interface GameEngineOptions {
 
 /** 默认规则常量。 */
 export const DEFAULT_GAME_CONFIG: GameConfig = {
-  gameDurationMs: 60_000,
-  appleLifespanMs: 10_000,
+  gameDurationMs: 180_000,
+  appleLifespanMs: 60_000,
   appleRespawnDelayMs: 1_000,
   maxApples: 2,
   stepDistance: 1,

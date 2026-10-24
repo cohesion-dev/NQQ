@@ -159,8 +159,8 @@ export class GameEngine {
       this.stop();
       return Promise.resolve(this.completedResult('stop', 0, false, 0));
     }
-    if (!Number.isInteger(steps) || steps < 1 || steps > 3) {
-      return Promise.resolve(this.rejectedResult(action, 'steps_must_be_between_1_and_3'));
+    if (!Number.isInteger(steps) || steps < 1) {
+      return Promise.resolve(this.rejectedResult(action, 'steps_must_be_positive_integer'));
     }
     if (action === 'spin' && steps !== 1) {
       return Promise.resolve(this.rejectedResult(action, 'spin_accepts_one_step'));
@@ -372,7 +372,7 @@ export class GameEngine {
       this.emit('action_step', at, { action: pending.action, position: { ...this.position }, touchedBoundary: pending.touchedBoundary, collected: pending.collected });
     }
     this.completeMovementAction(at);
-    if (pending.stepsCompleted < pending.steps) {
+    if (pending.stepsCompleted < pending.steps && !pending.touchedBoundary) {
       this.prepareStep(pending, at);
       return;
     }

@@ -95,6 +95,11 @@ export class SceneView implements SceneViewApi {
     this.cow.setSpeechAmplitude(this.speechAmplitude);
   }
 
+  /** 切换聊天与抓苹果模式的角色外观，聊天时摘下眼罩。 */
+  setMode(mode: 'chat' | 'apple-game'): void {
+    this.cow.setBlindfolded(mode === 'apple-game');
+  }
+
   /** 停止动画循环并释放 Three.js 对象和监听器。 */
   dispose(): void {
     if (this.disposed) return;
@@ -294,6 +299,7 @@ class CowRig {
   private readonly mouth: THREE.Mesh;
   private readonly legs: THREE.Mesh[];
   private readonly pocket: THREE.Mesh;
+  private blindfold!: THREE.Mesh;
   private pose: SceneSnapshot['cow']['pose'] = 'idle';
   private tired = false;
   private target = { x: 0, z: 0, rotation: 0 };
@@ -358,6 +364,7 @@ class CowRig {
     blindfold.name = 'blindfold';
     blindfold.position.set(0, 0.12, 0.72);
     this.head.add(blindfold);
+    this.blindfold = blindfold;
   }
 
   /** 添加两只圆润牛角。 */
@@ -388,6 +395,9 @@ class CowRig {
     this.pose = cow.pose;
     this.tired = cow.tired || cow.pose === 'tired';
   }
+
+  /** 控制是否显示蒙眼眼罩。 */
+  setBlindfolded(value: boolean): void { this.blindfold.visible = value; }
 
   /** 更新移动插值和占位动作的轻量姿态。 */
   update(delta: number, elapsed: number, speechAmplitude: number): void {

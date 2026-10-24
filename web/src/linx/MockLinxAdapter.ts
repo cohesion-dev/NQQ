@@ -9,8 +9,8 @@ export class MockLinxAdapter {
   /** 将玩家文字解析为动作或普通聊天。 */
   async interpret(text: string): Promise<MockIntent> {
     const value = text.trim();
-    const steps = value.match(/([一二两三1-3])步/);
-    const parsedSteps = steps ? this.parseSteps(steps[1]) : undefined;
+    const steps = value.match(/(?:([0-9]+)|([一二两三四五六七八九十百]+))步/);
+    const parsedSteps = steps ? this.parseSteps(steps[1] ?? steps[2]) : undefined;
     const actionRules: Array<[RegExp, ActionName]> = [
       [/向左|左边|左走/, 'left'],
       [/向右|右边|右走/, 'right'],
@@ -35,7 +35,15 @@ export class MockLinxAdapter {
 
   /** 解析中文或阿拉伯数字步数。 */
   private parseSteps(value: string): number {
-    const map: Record<string, number> = { 一: 1, 两: 2, 二: 2, 三: 3 };
-    return Math.max(1, Math.min(3, map[value] ?? (Number(value) || 1)));
+    const map: Record<string, number> = { 一: 1, 两: 2, 二: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9 };
+    if (/^\d+$/.test(value)) return Math.max(1, Number(value));
+    if (value === '十') return 10;
+    const tenIndex = value.indexOf('十');
+    if (tenIndex >= 0) {
+      const tens = tenIndex === 0 ? 1 : map[value[tenIndex - 1]] ?? 1;
+      const ones = map[value[tenIndex + 1]] ?? 0;
+      return tens * 10 + ones;
+    }
+    return Math.max(1, map[value] ?? 1);
   }
 }

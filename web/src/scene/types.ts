@@ -41,6 +41,7 @@ export interface SceneViewApi {
   readonly canvasHost: HTMLElement;
   readonly threeScene: THREE.Scene;
   update(snapshot: SceneSnapshot): void;
+  setMode(mode: 'chat' | 'apple-game'): void;
   setSpeechAmplitude(value: number): void;
   dispose(): void;
 }

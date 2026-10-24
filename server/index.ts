@@ -92,6 +92,7 @@ export function attachGateway(http: import('node:http').Server | import('node:ht
     let sessionId = '';
     let roundId = '';
     let deadline = 0;
+    let mode: 'chat' | 'apple-game' = 'chat';
     let ready = false;
     let listening = false;
     let closed = false;
@@ -99,7 +100,7 @@ export function attachGateway(http: import('node:http').Server | import('node:ht
     let toolsDiscovered = false;
     let roundTimer: ReturnType<typeof setTimeout> | undefined;
     let setupTimer: ReturnType<typeof setTimeout> | undefined;
-    const pending = new Map<string, { id: string | number; timer?: ReturnType<typeof setTimeout>; result?: Message }>();
+    const pending = new Map<string, { id: string | number; name?: string; timer?: ReturnType<typeof setTimeout>; result?: Message }>();
 
     /** 向当前页面发送协议事件。 */
     function send(value: Message): void {
@@ -143,7 +144,7 @@ export function attachGateway(http: import('node:http').Server | import('node:ht
       if (!helloReceived || !toolsDiscovered || ready) return;
       ready = true;
       clearTimeout(setupTimer);
-      send({ type: 'ready' });
+      send({ type: 'ready', mode });
     }
 
     /** 在服务端建立虚拟设备，使用激活码绑定并获取上游地址。 */
@@ -200,7 +201,7 @@ export function attachGateway(http: import('node:http').Server | import('node:ht
         checkReady();
       }
       if (message.type === 'stt' && typeof message.text === 'string') send({ type: 'transcript', text: message.text });
-      if (message.type === 'tts' && message.state === 'sentence_start' && typeof message.text === 'string') send({ type: 'reply', text: message.text, roundId });
+      if (message.type === 'tts' && message.state === 'sentence_start' && typeof message.text === 'string') send({ type: 'reply', text: message.text, roundId, mode });
       if (message.type !== 'mcp') return;
       const payload = message.payload ?? {};
       const id = payload.id;
@@ -215,13 +216,40 @@ export function attachGateway(http: import('node:http').Server | import('node:ht
         const key = `${typeof id}:${id}`;
         const cached = pending.get(key);
         if (cached) { if (cached.result) toLinx(cached.result); return; }
-        pending.set(key, { id });
+        pending.set(key, { id, name: payload.params?.name });
         const args = payload.params?.arguments ?? {};
-        if (!roundId || Date.now() >= deadline) return toolResult(key, 'Game is not running', true);
         if (!args || typeof args !== 'object' || !validTool(payload.params?.name, args)) return toolResult(key, 'Invalid tool or arguments', true);
+        const toolName = payload.params?.name;
+        if (toolName === 'self.niuqiqi.start_apple_game') {
+          if (mode !== 'chat') return toolResult(key, 'Game is already running', true);
+          mode = 'apple-game';
+          roundId = randomUUID();
+          deadline = Date.now() + 180_000;
+          send({ type: 'round', roundId, endsAt: deadline, serverNow: Date.now(), mode });
+          clearTimeout(roundTimer);
+          roundTimer = setTimeout(() => {
+            send({ type: 'finished', roundId, mode: 'apple-game' });
+            mode = 'chat';
+            deadline = 0;
+            send({ type: 'mode', mode });
+          }, 180_000);
+        } else if (toolName === 'self.niuqiqi.exit_apple_game') {
+          if (mode !== 'apple-game') return toolResult(key, 'Game is not running', true);
+          mode = 'chat';
+          deadline = 0;
+          send({ type: 'mode', mode });
+        } else if (toolName === 'self.niuqiqi.do_action' && (mode !== 'apple-game' || !roundId || Date.now() >= deadline)) {
+          return toolResult(key, 'Game is not running', true);
+        }
         pending.get(key)!.timer = setTimeout(() => {
           toolResult(key, 'Tool execution timed out', true);
           send({ type: 'cancel', requestId: key, roundId });
+          if (toolName === 'self.niuqiqi.start_apple_game') {
+            mode = 'chat';
+            deadline = 0;
+            clearTimeout(roundTimer);
+            send({ type: 'mode', mode });
+          }
         }, 6000);
         send({ type: 'tool', requestId: key, roundId, name: payload.params.name, args });
       } else if (payload.method !== undefined) {
@@ -232,30 +260,36 @@ export function attachGateway(http: import('node:http').Server | import('node:ht
     browser.on('message', (data, binary) => {
       if (closed) return;
       if (binary) {
-        if (listening && deadline > Date.now() && upstream?.readyState === WebSocket.OPEN) upstream.send(data, { binary: true });
+        if (listening && (mode === 'chat' || deadline > Date.now()) && upstream?.readyState === WebSocket.OPEN) upstream.send(data, { binary: true });
         return;
       }
       try {
         const message = JSON.parse(data.toString()) as Message;
-        if (message.type === 'start') {
-          if (!ready || roundId) return send({ type: 'error', code: 'ROUND_NOT_READY' });
-          roundId = randomUUID(); deadline = Date.now() + 60000;
-          send({ type: 'round', roundId, endsAt: deadline, serverNow: Date.now() });
-          roundTimer = setTimeout(() => { send({ type: 'finished', roundId }); cleanup(); }, 60000);
-        } else if (message.type === 'result') {
-          if (message.roundId !== roundId || Date.now() >= deadline) return;
+        if (message.type === 'result') {
+          if (message.requestId === undefined || (message.roundId && message.roundId !== roundId)) return;
           if (!pending.has(message.requestId)) return;
+          const pendingItem = pending.get(message.requestId);
           toolResult(message.requestId, JSON.stringify(message.result), !!message.failed);
-        } else if (message.roundId === roundId && roundId && Date.now() < deadline) {
-          if (message.type === 'text' && typeof message.text === 'string' && message.text.trim() && message.text.length <= 2000) {
-            // 当前按官方带文本的 detect 示例接入，仍需真实账号验证工具触发行为。
-            toLinx({ type: 'listen', state: 'detect', text: message.text });
-          } else if (message.type === 'speech.start') {
+          if (pendingItem?.name === 'self.niuqiqi.start_apple_game' && message.failed) {
+            mode = 'chat';
+            deadline = 0;
+            clearTimeout(roundTimer);
+            send({ type: 'mode', mode });
+          }
+        } else if (message.type === 'speech.start' || message.type === 'speech.stop') {
+          if (!ready) return;
+          if (message.type === 'speech.start') {
             listening = true;
             toLinx({ type: 'abort', reason: 'wake_word_detected' });
             toLinx({ type: 'listen', state: 'start', mode: 'manual' });
-          } else if (message.type === 'speech.stop') {
-            listening = false; toLinx({ type: 'listen', state: 'stop', mode: 'manual' });
+          } else {
+            listening = false;
+            toLinx({ type: 'listen', state: 'stop', mode: 'manual' });
+          }
+        } else if (message.roundId === roundId && roundId && mode === 'apple-game' && Date.now() < deadline) {
+          if (message.type === 'text' && typeof message.text === 'string' && message.text.trim() && message.text.length <= 2000) {
+            // 当前按官方带文本的 detect 示例接入，仍需真实账号验证工具触发行为。
+            toLinx({ type: 'listen', state: 'detect', text: message.text });
           }
         }
       } catch { send({ type: 'error', code: 'INVALID_CLIENT_MESSAGE' }); }
