@@ -6,6 +6,7 @@ import { resolve, extname, sep } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { WebSocket, WebSocketServer } from 'ws';
 import { tools, validTool, canPerformAction } from '../shared/tools.ts';
+import { LinxAudioRelay } from './audio-relay.ts';
 
 type Message = Record<string, any>;
 const agentId = process.env.LINX_AGENT_ID?.trim();
@@ -45,7 +46,7 @@ function json(response: import('node:http').ServerResponse, status: number, valu
 await loadDevices();
 /** 同时用于开发服务器中间件与独立部署的 HTTP 请求处理器。 */
 export async function handleRequest(request: import('node:http').IncomingMessage, response: import('node:http').ServerResponse): Promise<void> {
-  if (request.url === '/api/config') return json(response, 200, { configured: !!agentId, sound: 'local-speech' });
+  if (request.url === '/api/config') return json(response, 200, { configured: !!agentId, sound: 'linx-stream' });
   if (request.url === '/api/session' && request.method === 'POST') {
     const origin = request.headers.origin;
     if (origin && !sameOrigin(origin, request.headers.host)) return json(response, 403, { error: 'Forbidden' });
@@ -106,6 +107,10 @@ export function attachGateway(http: import('node:http').Server | import('node:ht
     function send(value: Message): void {
       if (browser.readyState === WebSocket.OPEN) browser.send(JSON.stringify(value));
     }
+
+    const audioRelay = new LinxAudioRelay(send, (frame) => {
+      if (browser.readyState === WebSocket.OPEN) browser.send(frame, { binary: true });
+    });
 
     /** 只通过当前设备连接发送控制消息。 */
     function toLinx(value: Message): void {
@@ -186,8 +191,13 @@ export function attachGateway(http: import('node:http').Server | import('node:ht
       upstream = new WebSocket(url, { headers: { Authorization: `Bearer ${info.websocket.token}`, 'Device-Id': device, 'Client-Id': identity.client, 'Protocol-Version': '1', 'X-Agent-ID': agentId }, handshakeTimeout: 10000 });
       upstream.on('open', () => toLinx({ type: 'hello', version: 1, transport: 'websocket', features: { mcp: true }, audio_params: { format: 'pcm', sample_rate: 16000, channels: 1, bit_depth: 16, endianness: 'little', frame_duration: 20, frame_size: 320, sample_format: 'signed_int16' } }));
       upstream.on('message', (data, binary) => {
-        if (binary || closed) return;
-        try { handleUpstream(JSON.parse(data.toString())); } catch { fail('INVALID_UPSTREAM_MESSAGE'); }
+        if (closed) return;
+        if (binary) {
+          audioRelay.push(Array.isArray(data) ? Buffer.concat(data) : data instanceof ArrayBuffer ? new Uint8Array(data) : data);
+          return;
+        }
+        try { handleUpstream(JSON.parse(data.toString())); }
+        catch (error) { fail(error instanceof Error && error.message === 'UNSUPPORTED_AUDIO_PARAMS' ? error.message : 'INVALID_UPSTREAM_MESSAGE'); }
       });
       upstream.on('error', () => fail('LINX_CONNECTION_FAILED'));
       upstream.on('close', () => { if (!closed) fail('LINX_DISCONNECTED'); });
@@ -196,10 +206,12 @@ export function attachGateway(http: import('node:http').Server | import('node:ht
     /** 处理服务端握手、文字和端侧工具协议。 */
     function handleUpstream(message: Message): void {
       if (message.type === 'hello') {
+        audioRelay.configure(message.audio_params);
         sessionId = typeof message.session_id === 'string' ? message.session_id : '';
         helloReceived = true;
         checkReady();
       }
+      audioRelay.handle(message);
       if (message.type === 'stt' && typeof message.text === 'string') send({ type: 'transcript', text: message.text });
       if (message.type === 'tts' && message.state === 'sentence_start' && typeof message.text === 'string') send({ type: 'reply', text: message.text, roundId, mode });
       if (message.type !== 'mcp') return;
@@ -284,6 +296,7 @@ export function attachGateway(http: import('node:http').Server | import('node:ht
           if (!ready) return;
           if (message.type === 'speech.start') {
             listening = true;
+            audioRelay.cancel();
             toLinx({ type: 'abort', reason: 'wake_word_detected' });
             toLinx({ type: 'listen', state: 'start', mode: 'manual' });
           } else {

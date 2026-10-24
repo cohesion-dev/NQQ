@@ -5,10 +5,12 @@ import { runSelfTest } from '../web/src/game/game-engine.test.ts';
 import { validTool } from '../shared/tools.ts';
 import { testChatSkills } from './chat-skills.test.ts';
 import { testGameSpin } from './game-spin.test.ts';
+import { testLinxAudio } from './linx-audio.test.ts';
 
 await runSelfTest();
 await testChatSkills();
 await testGameSpin();
+await testLinxAudio();
 assert.equal(validTool('self.niuqiqi.do_action', { action: 'left', steps: 3 }), true);
 assert.equal(validTool('self.niuqiqi.do_action', { action: 'shell', steps: 1 }), false);
 assert.equal(validTool('self.niuqiqi.do_action', { action: 'left', steps: 4 }), false);
@@ -66,4 +68,4 @@ async function testVadTransition(): Promise<void> {
   assert(frames.some((frame) => !frame.speech));
 }
 await testVadTransition();
-console.info('Game rules, chat skills, tool validation and PCM resampling tests passed');
+console.info('Game rules, chat skills, tool validation, PCM resampling and Linx audio tests passed');
