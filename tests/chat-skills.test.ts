@@ -221,10 +221,44 @@ export async function testChatSkills(): Promise<void> {
   assert.equal(scene.isChatSkillPlaying, true, 'Conversation only interrupts automatic performances');
   rig.update(3);
   assert.equal((await manualFlip).status, 'completed');
-  scene.playIdleDance();
+
+  const idleTimer = new ChatIdleTimer();
+  /** 复用页面调度条件，让真实片段结束后间隔半秒重新抽取舞蹈。 */
+  function advanceIdle(now: number): void {
+    if (idleTimer.update(now, true, false, scene.isChatSkillPlaying, scene.isIdleDancePlaying)) scene.playIdleDance();
+  }
+  advanceIdle(0);
+  advanceIdle(4_999);
+  assert.equal(scene.isChatSkillPlaying, false, 'Automatic dancing waits five seconds');
+  let idleNow = 5_000;
+  for (let index = 0; index < DANCE_CLIPS.length; index++) {
+    randomValue = (index + 0.1) / DANCE_CLIPS.length;
+    advanceIdle(idleNow);
+    assert.equal(scene.isIdleDancePlaying, true, 'A new random dance starts after the half-second interval');
+    const duration = clips.find((clip) => clip.name === DANCE_CLIPS[index])!.duration;
+    rig.update(duration / 2);
+    assertRotation(upperLeg.quaternion, clipRotation(DANCE_CLIPS[index], duration / 2));
+    advanceIdle(idleNow + duration * 500);
+    assert.equal(scene.isIdleDancePlaying, true, 'An active dance is neither replaced nor restarted');
+    rig.update(duration / 2 + 0.01);
+    assert.equal(scene.isChatSkillPlaying, false, 'Each real clip finishes before another is selected');
+    idleNow += duration * 1_000 + 10;
+    advanceIdle(idleNow);
+    advanceIdle(idleNow + 499);
+    assert.equal(scene.isChatSkillPlaying, false, 'Each completed dance is followed by half a second of rest');
+    idleNow += 500;
+  }
+  advanceIdle(idleNow);
+  idleTimer.reset();
   scene.cancelIdleDance();
   assert.equal(scene.isChatSkillPlaying, false, 'Speech cancels an automatic performance immediately');
   assertRotation(upperLeg.quaternion, restUpper);
+  advanceIdle(idleNow + 1);
+  advanceIdle(idleNow + 5_000);
+  assert.equal(scene.isChatSkillPlaying, false, 'Speech resets the five-second wait');
+  advanceIdle(idleNow + 5_001);
+  assert.equal(scene.isIdleDancePlaying, true);
+  scene.cancelIdleDance();
   const cancelledFlip = scene.playChatSkill('somersault');
   scene.cancelChatSkill();
   assert.equal((await cancelledFlip).status, 'cancelled');
@@ -242,25 +276,33 @@ export async function testChatSkills(): Promise<void> {
   await testGameAnimationProgress();
 }
 
-/** 覆盖十秒边界、双方说话、占用、模式停用以及结束后重新计时。 */
+/** 覆盖五秒启动、半秒间隔、循环跳舞及对话、主动技能和停用的重置。 */
 function testChatIdleTimer(): void {
   const timer = new ChatIdleTimer();
   assert.equal(timer.update(0, true, false, false), false);
-  assert.equal(timer.update(9_999, true, false, false), false);
-  assert.equal(timer.update(10_000, true, false, false), true);
-  assert.equal(timer.update(10_001, true, false, true), false);
+  assert.equal(timer.update(4_999, true, false, false), false);
+  assert.equal(timer.update(5_000, true, false, false), true);
+  assert.equal(timer.update(5_001, true, false, true, true), false);
+  assert.equal(timer.update(13_200, true, false, false), false);
+  assert.equal(timer.update(13_699, true, false, false), false);
+  assert.equal(timer.update(13_700, true, false, false), true);
+  assert.equal(timer.update(13_701, true, false, true, true), false);
   assert.equal(timer.update(20_000, true, false, false), false);
-  assert.equal(timer.update(30_000, true, false, false), true);
-  timer.update(31_000, true, false, false);
-  timer.update(35_000, true, true, false);
-  assert.equal(timer.update(50_000, true, false, false), false);
-  assert.equal(timer.update(59_999, true, false, false), false);
-  assert.equal(timer.update(60_000, true, false, false), true);
-  timer.update(61_000, true, false, false);
+  assert.equal(timer.update(20_001, true, true, true, true), false);
+  assert.equal(timer.update(21_000, true, false, false), false);
+  assert.equal(timer.update(25_999, true, false, false), false);
+  assert.equal(timer.update(26_000, true, false, false), true);
+  assert.equal(timer.update(26_001, true, false, true), false);
+  assert.equal(timer.update(30_000, true, false, false), false);
+  assert.equal(timer.update(34_999, true, false, false), false);
+  assert.equal(timer.update(35_000, true, false, false), true);
   timer.reset();
-  assert.equal(timer.update(71_000, true, false, false), false);
-  assert.equal(timer.update(90_000, false, false, false), false);
-  assert.equal(timer.update(100_000, true, false, false), false);
+  assert.equal(timer.update(40_000, true, false, false), false);
+  assert.equal(timer.update(45_000, true, false, false), true);
+  assert.equal(timer.update(45_001, false, false, true, true), false);
+  assert.equal(timer.update(50_000, true, false, false), false);
+  assert.equal(timer.update(54_999, true, false, false), false);
+  assert.equal(timer.update(55_000, true, false, false), true);
 }
 
 /** 从真实游戏时钟验证去程、回正与后退两次转身的进度和最终朝向。 */

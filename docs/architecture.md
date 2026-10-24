@@ -40,7 +40,7 @@ flowchart LR
 | 圆周运动 | 两种模式共用位置与朝向采样；游戏计算圆弧接触和首次触边进度 | [共享路径](../shared/circle-motion.ts)、[circle-path.ts](../web/src/game/circle-path.ts) |
 | 三维表现 | 加载模型、镜头、阴影、苹果入袋、姿态映射；`ModelRig` 管理模型动画和水平根位移 | [SceneView.ts](../web/src/scene/SceneView.ts) |
 | 聊天动作 | 绕圈轨迹、真实动画片段的结束与取消、程序化兜底；不修改游戏得分 | [ChatSkillPlayer.ts](../web/src/scene/ChatSkillPlayer.ts) |
-| 空闲计时 | 在允许表演、双方未说话且无动作占用时累计十秒 | [ChatIdleTimer.ts](../web/src/scene/ChatIdleTimer.ts) |
+| 空闲计时 | 静默五秒后触发舞蹈，每支结束停半秒再随机续播 | [ChatIdleTimer.ts](../web/src/scene/ChatIdleTimer.ts) |
 | 页面显示 | 切换聊天/游戏数字图层、展示最多一百条对话记录；不渲染操作按钮 | [UiController.ts](../web/src/ui/UiController.ts) |
 | 音频输入 | 申请麦克风、分帧、语音活动检测、回复播放时暂停上传 | [PcmRecorder.ts](../web/src/audio/PcmRecorder.ts)、[pcm-worklet.js](../web/src/audio/pcm-worklet.js) |
 | 声音占位 | 浏览器文字朗读、简单合成音效、模拟说话振幅 | [MockAudio.ts](../web/src/audio/MockAudio.ts) |
@@ -116,7 +116,7 @@ sequenceDiagram
 - 两种模式的 `spin` 共用半径一米、默认约 4.2 秒的圆周采样，身体朝向路径切线并播放 `Walking`。聊天绕圈由技能节点承载；游戏绕圈的位置由规则引擎推进，圆弧上的真实接触负责计分。游戏中途停止保留位置，触边提前结束；聊天技能停止时复位技能节点。
 - `ModelRig` 锁定动画的水平根位移，避免动画自行把角色带离碰撞坐标；游戏转身去除骨盆动画的重复水平旋转，由外层轨迹控制最终朝向。
 - 聊天跳舞在四个候选片段中随机选择，后空翻使用 `Backflip`，以混合器结束事件回传完成；游戏后空翻按本地规则阶段进度采样。模型不可用时保留程序化表现兜底。
-- 聊天双方结束说话后空闲十秒，自动表演一次；用户开口或指令到达停止自动表演，主动技能优先。自动表演不创建工具请求，不回传伪造的执行结果。
+- 聊天双方结束说话后静默五秒，开始连续随机表演，每支舞结束停半秒再重新随机选择；用户开口或指令到达停止自动表演，对话结束后重新等待五秒，主动技能优先。自动表演不创建工具请求，不回传伪造的执行结果。
 
 运行资源是 `assets/niu_qi_qi.glb`。GLB（三维模型二进制传输格式）内部包含骨骼和十九个动画片段；完整动作、选择规则和表情限制见[模型动作清单](model-assets.md)。
 

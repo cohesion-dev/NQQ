@@ -142,6 +142,9 @@ export class SceneView implements SceneViewApi {
   /** 向空闲计时提供统一占用状态，包含真实动画和程序化绕圈。 */
   get isChatSkillPlaying(): boolean { return this.chatSkills.isPlaying; }
 
+  /** 区分自动舞蹈与主动技能，让连续跳舞保留静默计时。 */
+  get isIdleDancePlaying(): boolean { return this.chatSkills.isAutomatic; }
+
   /** 自动表演复用同一随机舞蹈入口，不向灵矽伪造工具调用。 */
   playIdleDance(): void {
     if (this.mode !== 'chat' || this.disposed || !this.modelCow || this.chatSkills.isPlaying) return;
