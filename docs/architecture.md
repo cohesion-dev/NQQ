@@ -40,7 +40,7 @@ flowchart LR
 | 圆周运动 | 两种模式共用位置与朝向采样；游戏计算圆弧接触和首次触边进度 | [共享路径](../shared/circle-motion.ts)、[circle-path.ts](../web/src/game/circle-path.ts) |
 | 三维表现 | 加载模型、镜头、阴影、苹果入袋、姿态映射；`ModelRig` 管理模型动画和水平根位移 | [SceneView.ts](../web/src/scene/SceneView.ts) |
 | 聊天动作 | 绕圈轨迹、真实动画片段的结束与取消、程序化兜底；不修改游戏得分 | [ChatSkillPlayer.ts](../web/src/scene/ChatSkillPlayer.ts) |
-| 空闲计时 | 静默五秒后触发舞蹈，每支结束停半秒再随机续播 | [ChatIdleTimer.ts](../web/src/scene/ChatIdleTimer.ts) |
+| 空闲计时 | 静默三秒后触发随机轮播，每段结束停半秒再续播 | [ChatIdleTimer.ts](../web/src/scene/ChatIdleTimer.ts) |
 | 页面显示 | 切换聊天/游戏数字图层、展示最多一百条对话记录；不渲染操作按钮 | [UiController.ts](../web/src/ui/UiController.ts) |
 | 音频输入 | 申请麦克风、分帧、语音活动检测、回复播放时暂停上传 | [PcmRecorder.ts](../web/src/audio/PcmRecorder.ts)、[pcm-worklet.js](../web/src/audio/pcm-worklet.js) |
 | 语音输出 | 按下行参数解码、连续播放、取消旧任务、按实际振幅驱动嘴型 | [LinxAudio.ts](../web/src/audio/LinxAudio.ts) |
@@ -122,10 +122,10 @@ sequenceDiagram
 - 游戏普通移动按照“转向 → 移动 → 回正”执行。动画按规则阶段采样；正常移动使用 `Running`，疲惫使用 `Walking`，两者实际移动速度沿用规则配置。
 - 两种模式的 `spin` 共用半径一米、默认约 4.2 秒的圆周采样，身体朝向路径切线并播放 `Walking`。聊天绕圈由技能节点承载；游戏绕圈的位置由规则引擎推进，圆弧上的真实接触负责计分。游戏中途停止保留位置，触边提前结束；聊天技能停止时复位技能节点。
 - `ModelRig` 锁定动画的水平根位移，避免动画自行把角色带离碰撞坐标；游戏转身去除骨盆动画的重复水平旋转，由外层轨迹控制最终朝向。
-- 聊天跳舞在四个候选片段中随机选择，后空翻使用 `Backflip`，以混合器结束事件回传完成；游戏后空翻按本地规则阶段进度采样。模型不可用时保留程序化表现兜底。
-- 聊天双方结束说话后静默五秒，开始连续随机表演，每支舞结束停半秒再重新随机选择；用户开口或指令到达停止自动表演，对话结束后重新等待五秒，主动技能优先。自动表演不创建工具请求，不回传伪造的执行结果。
+- 主动聊天跳舞在 idle 模型的三个候选片段中随机选择，以混合器结束事件回传完成。游戏不包含跳跃、翻跟头或摘苹果角色动作；苹果由碰撞规则自动抓取。
+- 聊天模式进入后，页面在前台且双方静默三秒，从 idle.glb 中排除 Running/Walking 后随机选择闲置动作，每段结束停半秒，不依赖灵矽连接是否已经就绪。用户开口或指令到达停止自动表演，静默三秒后重新随机选择，主动技能优先。说话期间循环播放 Talk_with_Hands_Open。切模式停止自动表演。自动表演不创建工具请求，不回传伪造的执行结果。
 
-运行资源是 `assets/niu_qi_qi.glb`。GLB（三维模型二进制传输格式）内部包含骨骼和十九个动画片段；完整动作、选择规则和表情限制见[模型动作清单](model-assets.md)。
+运行资源为 `assets/game.glb`（游戏，28 根骨骼、7 动作）和 `assets/idle.glb`（聊天/闲置，38 根骨骼、13 动作）。各自持有骨架和混合器，按模式只显示并更新其中一套，不能直接混用动作。旧 niu_qi_qi.glb 仅保留为回归夹具。完整动作、选择规则和表情限制见[模型动作清单](model-assets.md)。
 
 ## 6. 重复请求、超时与生命周期
 

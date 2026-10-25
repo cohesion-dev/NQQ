@@ -13,14 +13,13 @@ export type ActionName =
   | 'forward'
   | 'backward'
   | 'spin'
-  | 'somersault'
   | 'stop';
 
 /** 牛完成动作后默认面向的固定前方，以及动作中间的朝向。 */
 export type Heading = 'front' | 'left' | 'back' | 'right';
 
 /** 复合动作当前执行阶段。 */
-export type ActionPhase = 'turn' | 'walk' | 'face_front' | 'spin' | 'somersault';
+export type ActionPhase = 'turn' | 'walk' | 'face_front' | 'spin';
 
 /** 游戏生命周期。 */
 export type GamePhase = 'ready' | 'running' | 'finished';
@@ -34,7 +33,6 @@ export interface GameConfig {
   stepDistance: number;
   stepDurationMs: number;
   spinDurationMs: number;
-  somersaultDurationMs: number;
   fatigueAfterActions: number;
   fatigueDurationMs: number;
   appleCollisionRadius: number;
@@ -128,7 +126,6 @@ export const DEFAULT_GAME_CONFIG: GameConfig = {
   stepDistance: 1,
   stepDurationMs: 600,
   spinDurationMs: CIRCLE_DURATION_SECONDS * 1_000,
-  somersaultDurationMs: 1_800,
   fatigueAfterActions: 3,
   fatigueDurationMs: 5_000,
   appleCollisionRadius: 0.8,

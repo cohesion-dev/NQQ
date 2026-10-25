@@ -162,7 +162,7 @@ export class GameEngine {
   public requestAction(action: ActionName, steps = 1): Promise<ActionResult> {
     const at = this.now();
     this.tick(at);
-    if (!['left', 'right', 'forward', 'backward', 'spin', 'somersault', 'stop'].includes(action)) {
+    if (!['left', 'right', 'forward', 'backward', 'spin', 'stop'].includes(action)) {
       return Promise.resolve(this.rejectedResult(action, 'invalid_action'));
     }
     if (this.phase !== 'running') {
@@ -175,7 +175,7 @@ export class GameEngine {
     if (!Number.isInteger(steps) || steps < 1 || steps > 3) {
       return Promise.resolve(this.rejectedResult(action, 'steps_must_be_between_1_and_3'));
     }
-    if (['spin', 'somersault'].includes(action) && steps !== 1) {
+    if (action === 'spin' && steps !== 1) {
       return Promise.resolve(this.rejectedResult(action, 'skill_accepts_one_step'));
     }
     if (this.queue.length + (this.currentAction ? 1 : 0) >= 2) {
@@ -399,7 +399,7 @@ export class GameEngine {
     if (!pending) return;
     if (pending.phase === 'turn') {
       this.heading = pending.targetHeading;
-      if (pending.action === 'spin' || pending.action === 'somersault') {
+      if (pending.action === 'spin') {
         this.prepareActionPhase(pending, at);
       } else {
         this.prepareStep(pending, at);
@@ -412,13 +412,6 @@ export class GameEngine {
       return;
     }
     if (pending.phase === 'spin') {
-      pending.stepsCompleted = 1;
-      this.heading = 'front';
-      this.completeMovementAction(at);
-      this.completeFinalAction(pending, at);
-      return;
-    }
-    if (pending.phase === 'somersault') {
       pending.stepsCompleted = 1;
       this.heading = 'front';
       this.completeMovementAction(at);
@@ -452,12 +445,6 @@ export class GameEngine {
       const boundary = firstCircleBoundaryProgress(pending.stepStart, this.config.bounds);
       pending.touchedBoundary = boundary !== null;
       pending.dueAt = at + this.config.spinDurationMs * (boundary ?? 1);
-      return;
-    }
-    if (pending.action === 'somersault') {
-      pending.phase = 'somersault';
-      pending.startedAt = at;
-      pending.dueAt = at + this.config.somersaultDurationMs;
       return;
     }
     const target = this.headingForAction(pending.action);
