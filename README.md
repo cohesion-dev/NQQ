@@ -23,6 +23,10 @@ npm run test:coverage
 
 命令运行现有单测并生成终端汇总、`coverage/index.html` 明细、`coverage/coverage-summary.json` 汇总数据和 `coverage/lcov.info` 通用报告。GitHub Actions（自动化检查服务）每次检查重新统计，在运行摘要展示指标，并提供 `unit-test-coverage` 报告下载。上表为手动维护的快照，更新时应同时核对百分比、计数和日期；最新结果以对应运行的报告为准。
 
+主仓库 `cohesion-dev/NQQ` 的 `main` 分支推送后，工作流通过 OIDC（OpenID Connect，开放身份连接）认证，将 `coverage/lcov.info` 上传到 [Codecov 覆盖率报告](https://app.codecov.io/gh/cohesion-dev/NQQ)。派生仓库和拉取请求只生成本地报告，不上传。
+
+首次接入需要在 Codecov 添加并授权访问私有仓库 `cohesion-dev/NQQ`；工作流已配置 GitHub Actions 的 OIDC 上传身份，首次主分支运行仍需验证 Codecov 接收成功，上传失败会使对应检查失败。私有仓库的覆盖率徽章地址需从 Codecov 项目设置复制，其中的徽章访问令牌与上传密钥不同，不可用其他项目的令牌替代。
+
 ## 当前实现
 
 - 面向 iPhone 12 Pro Max 竖屏的移动网页：使用动态视口高度和安全区域，默认显示聊天模式，游戏模式显示规则、挑战和结算。

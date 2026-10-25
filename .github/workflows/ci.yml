@@ -18,6 +18,9 @@ jobs:
   check:
     name: 类型检查与测试
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
     steps:
       - name: 检出代码
         uses: actions/checkout@v7
@@ -36,6 +39,16 @@ jobs:
 
       - name: 单元测试与覆盖率
         run: npm run test:coverage
+
+      # 私有仓库只在主仓库的 main 推送后上传，派生仓库的 PR 保留本地报告。
+      - name: 上传覆盖率到 Codecov
+        if: github.repository == 'cohesion-dev/NQQ' && github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: codecov/codecov-action@v5
+        with:
+          use_oidc: true
+          files: ./coverage/lcov.info
+          disable_search: true
+          fail_ci_if_error: true
 
       - name: 展示覆盖率指标
         run: |
