@@ -34,8 +34,29 @@ jobs:
       - name: 类型检查
         run: npm run typecheck
 
-      - name: 规则与工具校验测试
-        run: npm test
+      - name: 单元测试与覆盖率
+        run: npm run test:coverage
+
+      - name: 展示覆盖率指标
+        run: |
+          node --input-type=module <<'NODE'
+          import { readFileSync, appendFileSync } from 'node:fs';
+          const { total } = JSON.parse(readFileSync('coverage/coverage-summary.json', 'utf8'));
+          let summary = '## 单元测试覆盖率\n\n| 指标 | 覆盖率 | 已覆盖 / 总数 |\n| --- | ---: | ---: |\n';
+          for (const [key, label] of [['lines', '行'], ['statements', '语句'], ['functions', '函数'], ['branches', '分支']]) {
+            const metric = total[key];
+            summary += `| ${label} | ${metric.pct}% | ${metric.covered} / ${metric.total} |\n`;
+          }
+          appendFileSync(process.env.GITHUB_STEP_SUMMARY, summary);
+          NODE
+
+      - name: 上传覆盖率报告
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: unit-test-coverage
+          path: coverage/
+          if-no-files-found: ignore
 
       - name: 构建
         run: npm run build

@@ -4,3 +4,4 @@ dist/
 !.env.example
 .linx-devices.json
 test-results/
+coverage/
