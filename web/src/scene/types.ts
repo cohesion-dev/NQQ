@@ -3,7 +3,7 @@ import type { ChatSkill } from '../../../shared/tools';
 import type { ChatSkillResult } from './ChatSkillPlayer';
 
 /** 场景中牛七七的姿态。 */
-export type CowPose = 'idle' | 'walk' | 'turn_left' | 'turn_right' | 'turn_back' | 'face_front' | 'spin' | 'somersault' | 'reach' | 'grab' | 'pocket' | 'tired' | 'recover' | 'talk' | 'stop';
+export type CowPose = 'idle' | 'walk' | 'backward' | 'turn_left' | 'turn_right' | 'turn_back' | 'face_front' | 'spin' | 'reach' | 'grab' | 'pocket' | 'tired' | 'recover' | 'talk' | 'stop';
 
 /** 场景展示阶段。 */
 export type ScenePhase = 'ready' | 'running' | 'result';

@@ -181,6 +181,25 @@ async function testContinuousMovement(): Promise<void> {
   engine.tick();
   assertEqual((await move).collected, 1, '动作结果应包含执行中已抓取的苹果');
   assertEqual(engine.snapshot().heading, 'front', '移动动作完成后应面向前方');
+
+  // 玩家视角回归：向左后向前，第二个动作必须沿固定前方 z+ 移动，不能继续沿左侧 x-。
+  let directionTime = 0;
+  const directionEngine = new GameEngine({ now: () => directionTime, config: { stepDurationMs: 600 } });
+  directionEngine.start();
+  const leftPromise = directionEngine.requestAction('left');
+  directionTime = 1_200;
+  directionEngine.tick();
+  assertEqual((await leftPromise).status, 'completed', '向左动作应完成');
+  assertEqual(directionEngine.snapshot().position.x, -1, '向左应改变玩家视角的 x');
+  assertEqual(directionEngine.snapshot().position.z, 0, '向左不应改变玩家视角的 z');
+  const forwardPromise = directionEngine.requestAction('forward');
+  directionTime = 1_800;
+  directionEngine.tick();
+  assertEqual(directionEngine.snapshot().position.x, -1, '向前不应继续向左');
+  assert(directionEngine.snapshot().position.z > 0, '向前应沿玩家视角 z+ 移动');
+  directionTime = 2_100;
+  directionEngine.tick();
+  assertEqual((await forwardPromise).status, 'completed', '向前动作应完成');
   time = 1_599;
   engine.tick();
   assertEqual(engine.snapshot().apples.length, 1, '真实接触后一秒前不能补位');
@@ -207,14 +226,6 @@ async function testContinuousMovement(): Promise<void> {
   stopping.stop();
   assertEqual((await stopped).status, 'cancelled', '停止应取消未完成动作');
   assertEqual(stopping.snapshot().position.x, 0, '转向阶段停止不能产生位移');
-
-  const somersault = new GameEngine({ now: () => 0 });
-  somersault.start();
-  const flip = somersault.requestAction('somersault');
-  somersault.tick(1_800);
-  assertEqual((await flip).status, 'completed', '翻跟头技能应完成');
-  assertEqual(somersault.snapshot().position.x, 0, '翻跟头不应产生位移');
-  assertEqual(somersault.snapshot().heading, 'front', '翻跟头结束后应面向前方');
 
   const fatigue = createTestEngine();
   fatigue.engine.start();

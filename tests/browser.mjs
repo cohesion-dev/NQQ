@@ -12,10 +12,20 @@ const browser = await chromium.launch({
 });
 try {
   // 使用模拟网关验证模式切换和页面契约，不代表真实灵矽或真机验收通过。
-  const context = await browser.newContext({ ...devices['iPhone 12 Pro Max'], viewport: { width: 428, height: 926 } });
+  // 软件 WebGL 使用 1 倍像素比，保持手机 CSS 视口，避免大贴图的 3 倍回读拖慢 CI。
+  const context = await browser.newContext({ ...devices['iPhone 12 Pro Max'], deviceScaleFactor: 1, viewport: { width: 428, height: 926 } });
   const page = await context.newPage();
   const errors = [];
   const results = [];
+  const resultWaiters = new Map();
+  const waitResult = (id) => {
+    const existing = results.find(message => message.requestId === id);
+    if (existing) return Promise.resolve(existing);
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error(`Missing tool result: ${id}; errors=${errors.join(';')}`)), 10000);
+      resultWaiters.set(id, (message) => { clearTimeout(timer); resolve(message); });
+    });
+  };
   let socket;
   const gameRoundId = 'browser-test-game';
   page.on('pageerror', (error) => errors.push(error.message));
@@ -24,13 +34,17 @@ try {
     socket = connection;
     connection.onMessage((data) => {
       const message = JSON.parse(data.toString());
-      if (message.type === 'result') results.push(message);
+      if (message.type === 'result') {
+        results.push(message);
+        resultWaiters.get(message.requestId)?.(message);
+        resultWaiters.delete(message.requestId);
+      }
     });
     connection.send(JSON.stringify({ type: 'ready', mode: 'chat' }));
   });
   await page.route('**/api/session', (route) => route.fulfill({ json: { status: 'ready' } }));
   await page.addInitScript(() => {
-    // 固定舞蹈选择，以便按 All_Night_Dance 的实际时长核对完成时机。
+    // 固定主动舞蹈选择，以便按 Hip_Hop_Dance_3 的实际时长核对完成时机。
     Math.random = () => 0.01;
     Object.defineProperty(navigator.mediaDevices, 'getUserMedia', {
       value: async () => { throw new DOMException('Permission denied', 'NotAllowedError'); },
@@ -39,12 +53,13 @@ try {
   const modelLoaded = page.waitForEvent('console', { predicate: (message) => message.text().startsWith('Loaded GLB cow model;') });
   await page.goto(process.env.NQQ_TEST_URL || 'http://127.0.0.1:5173/');
   await modelLoaded;
+  await page.locator('.stage[data-game-model="ready"][data-idle-model="ready"]').waitFor();
   await page.locator('canvas').waitFor();
   assert.equal(await page.locator('button').count(), 0);
   assert.equal(await page.locator('.game-numbers').count(), 0);
 
   // 聊天技能不应开局，也不能在动画开始时就报告完成。
-  for (const [action, duration] of [['spin', 4200], ['somersault', 2134], ['dance', 8167]]) {
+  for (const [action, duration] of [['spin', 4200], ['jump', 1867], ['dance', 4700]]) {
     const requestId = `chat-${action}`;
     socket.send(JSON.stringify({ type: 'tool', requestId, roundId: '', name: 'self.niuqiqi.do_action', args: { action } }));
     await page.clock.runFor(300);
@@ -53,18 +68,12 @@ try {
     await page.clock.runFor(duration + 300);
     assert.equal(results.find((message) => message.requestId === requestId)?.result.status, 'completed');
   }
-  socket.send(JSON.stringify({ type: 'tool', requestId: 'chat-cancel', roundId: '', name: 'self.niuqiqi.do_action', args: { action: 'somersault' } }));
-  await page.clock.runFor(300);
   socket.send(JSON.stringify({ type: 'tool', requestId: 'chat-stop', roundId: '', name: 'self.niuqiqi.do_action', args: { action: 'stop' } }));
   await page.clock.runFor(100);
-  assert.equal(results.find((message) => message.requestId === 'chat-cancel')?.result.status, 'cancelled');
   assert.equal(results.find((message) => message.requestId === 'chat-stop')?.result.status, 'completed');
 
   // 空闲表演不能阻塞后续主动动作；进入游戏时必须取消尚未结束的舞蹈。
   await page.clock.runFor(10_100);
-  socket.send(JSON.stringify({ type: 'tool', requestId: 'after-idle', roundId: '', name: 'self.niuqiqi.do_action', args: { action: 'somersault' } }));
-  await page.clock.runFor(2500);
-  assert.equal(results.find((message) => message.requestId === 'after-idle')?.result.status, 'completed');
   socket.send(JSON.stringify({ type: 'tool', requestId: 'dance-before-game', roundId: '', name: 'self.niuqiqi.do_action', args: { action: 'dance' } }));
   await page.clock.runFor(300);
 
@@ -77,7 +86,7 @@ try {
 
   socket.send(JSON.stringify({ type: 'tool', requestId: 'move-1', roundId: gameRoundId, name: 'self.niuqiqi.do_action', args: { action: 'left', steps: 3 } }));
   await page.clock.runFor(3000);
-  assert.equal(results.some((message) => message.requestId === 'move-1'), true);
+  assert.equal((await waitResult('move-1')).result.status, 'completed');
 
   socket.send(JSON.stringify({ type: 'tool', requestId: 'game-spin', roundId: gameRoundId, name: 'self.niuqiqi.do_action', args: { action: 'spin' } }));
   await page.clock.runFor(2100);

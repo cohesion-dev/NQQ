@@ -1,4 +1,4 @@
-/** 累计聊天静默时间，自动舞蹈之间保留计时以便连续播放。 */
+/** 累计聊天静默时间，自动动作之间连续衔接。 */
 export class ChatIdleTimer {
   private idleSince: number | null = null;
   private wasAutomatic = false;
@@ -11,7 +11,7 @@ export class ChatIdleTimer {
     this.nextDanceAt = 0;
   }
 
-  /** 静默满五秒开始跳舞，自动舞蹈结束后间隔半秒再触发下一支。 */
+  /** 静默满三秒开始动作，自动动作结束后暂停半秒再触发下一支。 */
   update(now: number, enabled: boolean, talking: boolean, busy: boolean, automatic = false): boolean {
     if (!enabled || talking || (busy && !automatic)) {
       this.reset();
@@ -20,6 +20,6 @@ export class ChatIdleTimer {
     this.idleSince ??= now;
     if (this.wasAutomatic && !automatic) this.nextDanceAt = now + 500;
     this.wasAutomatic = automatic;
-    return !busy && now - this.idleSince >= 5_000 && now >= this.nextDanceAt;
+    return !busy && now - this.idleSince >= 3_000 && now >= this.nextDanceAt;
   }
 }

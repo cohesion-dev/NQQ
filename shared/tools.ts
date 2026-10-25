@@ -1,8 +1,8 @@
 /** 游戏工具的唯一动作集合，网页与网关共同验证。 */
-export const actions = ['left', 'right', 'forward', 'backward', 'spin', 'somersault', 'dance', 'stop'] as const;
+export const actions = ['left', 'right', 'forward', 'backward', 'spin', 'jump', 'dance', 'stop'] as const;
 
 /** 聊天技能只改变角色表现，不创建苹果游戏或改变得分。 */
-export const chatSkills = ['spin', 'somersault', 'dance'] as const;
+export const chatSkills = ['spin', 'jump', 'dance'] as const;
 export type ChatSkill = typeof chatSkills[number];
 
 /** 网关和页面共用模式限制，防止聊天技能被当作未开局动作拒绝。 */
@@ -20,7 +20,7 @@ export const tools = [
   },
   {
     name: 'self.niuqiqi.do_action',
-    description: '聊天模式允许 spin、somersault 原地翻跟头、dance 原地跳舞和 stop 停止，不需开始游戏。游戏模式允许 left/right/forward/backward 移动、spin、somersault 和 stop。两种模式的 spin 都是围绕身旁中心点走一圈（约4.2秒，结束回到起点并面向前方），游戏中会抓取沿途苹果，触边提前结束。移动会先转向、行走、最后回正；方向按画面判断。工具实际完成后才返回结果。',
+    description: '聊天模式允许 spin 原地绕圈、jump 跳跃、dance 跳舞和 stop 停止，不需开始游戏。游戏模式允许 left/right/forward/backward 移动、spin 和 stop；游戏不跳跃。spin 是围绕身旁中心点走一圈（约4.2秒，结束回到起点并面向前方），游戏中会抓取沿途苹果，触边提前结束。移动会先转向、行走、最后回正；方向按画面判断。工具实际完成后才返回结果。',
     inputSchema: {
       type: 'object', properties: {
         action: { type: 'string', enum: actions },
@@ -48,5 +48,5 @@ export function validTool(name: unknown, args: Record<string, unknown>): boolean
   if (Object.keys(args).some((key) => !['action', 'steps'].includes(key))) return false;
   const steps = args.steps ?? 1;
   return typeof steps === 'number' && Number.isInteger(steps) && steps >= 1 && steps <= 3
-    && (!['spin', 'somersault', 'dance', 'stop'].includes(String(args.action)) || steps === 1);
+    && (!['spin', 'jump', 'dance', 'stop'].includes(String(args.action)) || steps === 1);
 }

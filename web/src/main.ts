@@ -206,11 +206,14 @@ function startApp(): void {
   ui.render(game.snapshot()); scene.render(game.snapshot());
   /** 启动页面后建立聊天连接，让用户打开应用即可和牛七七说话。 */
   void client.connect().catch((error) => ui.notice(`无法连接牛七七：${error instanceof Error ? error.message : 'UNKNOWN_ERROR'}`));
-  /** 推进游戏时钟，聊天静默五秒后循环跳舞，每支之间停半秒。 */
+  /** 推进游戏时钟，聊天静默三秒后随机轮播闲置动作。 */
   function tick(): void {
     if (mode === 'apple-game') game.tick();
-    if (idleTimer.update(performance.now(), connected && mode === 'chat' && !document.hidden,
-      recorder.isSpeechActive || audio.speaking, scene.isChatSkillPlaying, scene.isIdleDancePlaying)) scene.playIdleDance();
+    const talking = recorder.isSpeechActive || audio.speaking;
+    scene.setConversationTalking(talking);
+    // 闲置动作属于本地表现，不应等待灵矽连接；未互动三秒即可开始随机播放。
+    if (idleTimer.update(performance.now(), mode === 'chat' && !document.hidden,
+      talking, scene.isChatSkillPlaying, scene.isIdleDancePlaying)) scene.playIdleDance();
     scene.setSpeechAmplitude(audio.amplitude);
     requestAnimationFrame(tick);
   }

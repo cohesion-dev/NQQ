@@ -7,8 +7,11 @@ import { CIRCLE_DURATION_SECONDS, sampleCircleMotion } from '../../../shared/cir
 import type { SceneSnapshot, SceneViewApi, SceneViewOptions } from './types';
 
 const DEFAULT_BACKGROUND = 0xaed8f2;
-const COW_MODEL_URL = new URL('../../../assets/niu_qi_qi.glb', import.meta.url).href;
-export const DANCE_CLIPS = ['All_Night_Dance', 'Stage_Walk', 'Hip_Hop_Dance', 'Hip_Hop_Dance_2'] as const;
+const GAME_MODEL_URL = new URL('../../../assets/game.glb', import.meta.url).href;
+const IDLE_MODEL_URL = new URL('../../../assets/idle.glb', import.meta.url).href;
+export const DANCE_CLIPS = ['Hip_Hop_Dance_1', 'Hip_Hop_Dance_3', 'OMG_Groove'] as const;
+export const JUMP_CLIPS = ['Regular_Jump', 'Happy_jump_f', 'Jump_with_Arms_and_Legs_Open'] as const;
+export const IDLE_EXCLUDED_CLIPS = new Set(['Running', 'Walking']);
 
 /** 在网页容器中创建可复用的舞台，并用程序化几何体展示牛、苹果和草地。 */
 export class SceneView implements SceneViewApi {
@@ -21,6 +24,8 @@ export class SceneView implements SceneViewApi {
   private readonly renderer: THREE.WebGLRenderer;
   private readonly cow: CowRig;
   private modelCow: ModelRig | null = null;
+  private gameCow: ModelRig | null = null;
+  private idleCow: ModelRig | null = null;
   private currentCowSnapshot: SceneSnapshot['cow'] | null = null;
   private readonly apples = new Map<string, THREE.Group>();
   private readonly pocketFlights: Array<{ mesh: THREE.Group; from: THREE.Vector3; elapsed: number }> = [];
@@ -28,6 +33,7 @@ export class SceneView implements SceneViewApi {
   private readonly clock = new THREE.Clock();
   private readonly resizeObserver: ResizeObserver;
   private mode: 'chat' | 'apple-game' = 'chat';
+  private conversationTalking = false;
   private readonly chatSkills = new ChatSkillPlayer();
   private animationFrame = 0;
   private speechAmplitude = 0;
@@ -116,7 +122,10 @@ export class SceneView implements SceneViewApi {
   /** 切换聊天与抓苹果模式的角色外观，聊天时摘下眼罩。 */
   setMode(mode: 'chat' | 'apple-game'): void {
     if (this.mode !== mode) this.cancelChatSkill();
+    this.conversationTalking = false;
+    this.idleCow?.setTalking(false);
     this.mode = mode;
+    this.selectModel();
     this.cow.setBlindfolded(mode === 'apple-game');
     this.modelCow?.setMode(mode);
     if (mode === 'chat') {
@@ -145,10 +154,11 @@ export class SceneView implements SceneViewApi {
   /** 区分自动舞蹈与主动技能，让连续跳舞保留静默计时。 */
   get isIdleDancePlaying(): boolean { return this.chatSkills.isAutomatic; }
 
-  /** 自动表演复用同一随机舞蹈入口，不向灵矽伪造工具调用。 */
+  /** 自动表演按选定片段顺序循环，不影响主动跳舞的选择。 */
   playIdleDance(): void {
     if (this.mode !== 'chat' || this.disposed || !this.modelCow || this.chatSkills.isPlaying) return;
-    void this.chatSkills.play('dance', this.modelCow.prepareChatPlayback('dance'), true);
+    const playback = this.modelCow.prepareIdlePlayback();
+    if (playback) void this.chatSkills.play('dance', playback, true);
   }
 
   /** 用户开口和指令到达时，仅中止自动触发的表演。 */
@@ -161,13 +171,29 @@ export class SceneView implements SceneViewApi {
     this.chatSkills.cancel();
   }
 
+  /** 说话期间使用 idle.glb 的摊手交流动作，结束后恢复闲置计时。 */
+  setConversationTalking(value: boolean): void {
+    value = value && this.mode === 'chat';
+    if (this.conversationTalking === value) return;
+    this.conversationTalking = value;
+    if (value) {
+      this.cancelChatSkill();
+      this.idleCow?.setTalking(true);
+    } else {
+      this.idleCow?.setTalking(false);
+    }
+  }
+
   /** 停止动画循环并释放 Three.js 对象和监听器。 */
   dispose(): void {
     if (this.disposed) return;
     this.disposed = true;
     this.cancelChatSkill();
+    this.idleCow?.setTalking(false);
     cancelAnimationFrame(this.animationFrame);
     this.resizeObserver.disconnect();
+    this.gameCow?.dispose();
+    this.idleCow?.dispose();
     disposeObject(this.threeScene);
     this.renderer.dispose();
     this.renderer.domElement.remove();
@@ -321,27 +347,57 @@ export class SceneView implements SceneViewApi {
     this.pocketFlights.length = 0;
   }
 
-  /** 异步加载用户提供的 GLB，加载成功后替换程序化牛并保留兜底模型。 */
+  /** 两份模型使用各自骨架和混合器，隐藏模型不更新，防止交叉绑定。 */
   private loadCowModel(): void {
     const loader = new GLTFLoader();
-    loader.load(
-      COW_MODEL_URL,
+    for (const [kind, url] of [['game', GAME_MODEL_URL], ['idle', IDLE_MODEL_URL]] as const) loader.load(
+      url,
       (gltf) => {
         const object = gltf.scene;
         if (this.disposed) {
           disposeObject(object);
           return;
         }
-        this.modelCow = new ModelRig(object, gltf.animations);
-        this.chatSkills.content.add(this.modelCow.group);
-        this.modelCow.setMode(this.mode);
-        this.cow.group.visible = false;
-        if (this.currentCowSnapshot) this.modelCow.setSnapshot(this.currentCowSnapshot);
-        console.info(`Loaded GLB cow model; animations=${gltf.animations.map((clip) => clip.name).join(',') || 'none'}`);
+        const idleDanceClips = kind === 'idle'
+          ? gltf.animations.map((clip) => clip.name).filter((name) => !IDLE_EXCLUDED_CLIPS.has(name))
+          : DANCE_CLIPS;
+        const rig = new ModelRig(object, gltf.animations, Math.random, idleDanceClips);
+        rig.group.name = `niuqiqi-${kind}-model`;
+        this.chatSkills.content.add(rig.group);
+        if (kind === 'game') this.gameCow = rig;
+        else this.idleCow = rig;
+        this.stage.dataset[`${kind}Model`] = 'ready';
+        this.selectModel();
+        console.info(`Loaded GLB cow model; source=${kind}; animations=${gltf.animations.map((clip) => clip.name).join(',') || 'none'}`);
       },
       undefined,
-      () => console.warn('GLB cow model failed to load; using programmatic cow'),
+      () => {
+        if (this.disposed) return;
+        this.stage.dataset[`${kind}Model`] = 'error';
+        console.warn(`GLB ${kind} cow model failed to load; using programmatic cow`);
+      },
     );
+  }
+
+  /** 模式变化或异步加载完成时，只显示当前模式的资源。 */
+  private selectModel(): void {
+    const next = this.mode === 'chat' ? this.idleCow : this.gameCow;
+    if (next !== this.modelCow) {
+      this.modelCow?.resetPlayback();
+      this.modelCow = next;
+      next?.resetPlayback();
+    }
+    if (this.gameCow) this.gameCow.group.visible = this.mode === 'apple-game';
+    if (this.idleCow) this.idleCow.group.visible = this.mode === 'chat';
+    this.cow.group.visible = !next;
+    if (next) {
+      next.setMode(this.mode);
+      next.setSnapshot(this.mode === 'chat'
+        ? { x: 0, z: 0, rotation: 0, pose: 'idle', tired: false }
+        : this.currentCowSnapshot ?? { x: 0, z: 0, rotation: 0, pose: 'idle', tired: false });
+      next.setSpeechAmplitude(this.speechAmplitude);
+      next.setTalking(this.conversationTalking);
+    }
   }
 }
 
@@ -388,9 +444,8 @@ export function toSceneSnapshot(snapshot: GameSnapshotLike): SceneSnapshot {
   let turnAngle = Math.atan2(Math.sin(targetRotation - headingRotation), Math.cos(targetRotation - headingRotation));
   if (Math.abs(Math.abs(turnAngle) - Math.PI) < 1e-6) turnAngle = -Math.PI;
   const pose = turning ? (Math.abs(turnAngle) > Math.PI / 2 + 1e-6 ? 'turn_back' : turnAngle < 0 ? 'turn_left' : 'turn_right')
-      : snapshot.actionPhase === 'somersault' ? 'somersault'
         : snapshot.actionPhase === 'spin' ? 'spin'
-          : snapshot.actionPhase === 'walk' ? 'walk'
+        : snapshot.actionPhase === 'walk' ? (snapshot.currentAction === 'backward' ? 'backward' : 'walk')
     : snapshot.currentAction === 'stop' ? 'stop' : 'idle';
   return {
     phase: snapshot.phase === 'finished' ? 'result' : snapshot.phase,
@@ -548,9 +603,8 @@ class CowRig {
     this.legs[3].rotation.x = walk;
     this.head.rotation.z = this.tired ? 0.16 : this.pose === 'talk' ? Math.sin(elapsed * 8) * 0.04 : moving ? Math.sin(elapsed * 6) * 0.08 : 0;
     this.body.rotation.z = this.tired ? 0.12 : 0;
-    this.body.rotation.x = this.pose === 'somersault' ? elapsed * Math.PI * 2.4 : 0;
     const tired = this.tired;
-    const surprised = this.pose.startsWith('turn_') || this.pose === 'somersault';
+    const surprised = this.pose.startsWith('turn_');
     const dizzy = this.pose === 'spin';
     this.mouth.scale.set(1 + (surprised || dizzy ? 0.35 : 0), 1 + (tired ? 2.8 : surprised || dizzy ? 1.4 : 0), 1);
     this.eyes.forEach((eye) => { eye.scale.y = tired ? 0.55 : dizzy ? 0.8 : 1; });
@@ -599,12 +653,18 @@ export class ModelRig {
   private readonly turnEuler = new THREE.Euler(0, 0, 0, 'YXZ');
   private chatWalking = false;
   private chatAction: THREE.AnimationAction | null = null;
+  private talkingAction: THREE.AnimationAction | null = null;
   private actionProgress = 0;
   private turnSteps = 1;
   private elapsed = 0;
+  private readonly object: THREE.Group;
+  private readonly idleClips: string[];
 
   /** 加载模型后统一尺寸、落地并建立动画片段索引。 */
-  constructor(object: THREE.Group, clips: THREE.AnimationClip[], private readonly random: () => number = Math.random) {
+  constructor(object: THREE.Group, clips: THREE.AnimationClip[], private readonly random: () => number = Math.random,
+    private readonly danceClips: readonly string[] = DANCE_CLIPS) {
+    this.object = object;
+    this.idleClips = clips.map((clip) => clip.name).filter((name) => !IDLE_EXCLUDED_CLIPS.has(name));
     this.walkCycle = new WalkCycle(object);
     this.hips = object.getObjectByName('mixamorigHips');
     this.hipsPosition = this.hips?.position.clone();
@@ -647,12 +707,30 @@ export class ModelRig {
     this.selectAction();
   }
 
-  /** 随机舞蹈和后空翻取得独占播放权，结束后恢复基础姿态。 */
+  /** 主动技能取得独占播放权；资源缺少片段时交给既有程序化兜底。 */
   prepareChatPlayback(skill: ChatSkill): ChatClipPlayback | undefined {
     if (skill === 'spin') return undefined;
-    const name = skill === 'dance' ? DANCE_CLIPS[Math.floor(this.random() * DANCE_CLIPS.length)] : 'Backflip';
+    const candidates = skill === 'jump'
+      ? JUMP_CLIPS.filter(name => this.actions.has(name.toLowerCase()))
+      : this.danceClips.filter(name => this.actions.has(name.toLowerCase()));
+    const name = candidates[Math.floor(this.random() * candidates.length)];
+    return this.preparePlayback(name);
+  }
+
+  /** 闲置按固定顺序轮播；被说话打断时保留本段，下次静默后重新播放。 */
+  prepareIdlePlayback(): ChatClipPlayback | undefined {
+    if (this.idleClips.length === 0) return undefined;
+    const name = this.idleClips[Math.floor(this.random() * this.idleClips.length)];
+    const playback = this.preparePlayback(name);
+    if (!playback) return undefined;
+    return { action: playback.action, release: () => {
+      playback.release();
+    } };
+  }
+
+  private preparePlayback(name: string): ChatClipPlayback | undefined {
     const action = this.actions.get(name.toLowerCase());
-    if (!action) return undefined;
+    if (!action || this.chatAction || this.talkingAction) return undefined;
     this.activeAction?.stop();
     this.activeAction = null;
     this.chatAction = action;
@@ -666,9 +744,45 @@ export class ModelRig {
     };
   }
 
+  /** 切模式时停止隐藏模型，闲置序列从头开始。 */
+  resetPlayback(): void {
+    this.mixer.stopAllAction();
+    this.activeAction = this.chatAction = this.talkingAction = null;
+    this.currentPose = '';
+    this.chatWalking = false;
+    this.selectAction();
+  }
+
+  dispose(): void {
+    this.mixer.stopAllAction();
+    this.mixer.uncacheRoot(this.object);
+    disposeObject(this.group);
+    this.group.removeFromParent();
+  }
+
+  /** 说话时循环播放 idle.glb 中的摊手交流动作。 */
+  setTalking(value: boolean): void {
+    const action = this.actions.get('talk_with_hands_open');
+    if (value) {
+      if (!action || this.talkingAction === action) return;
+      this.activeAction?.stop();
+      this.chatAction?.stop();
+      this.activeAction = null;
+      this.chatAction = null;
+      this.talkingAction = action;
+      this.currentPose = 'talking';
+      action.reset().setLoop(THREE.LoopRepeat, Infinity).setEffectiveWeight(1).play();
+    } else if (this.talkingAction) {
+      this.talkingAction.stop();
+      this.talkingAction = null;
+      this.currentPose = '';
+      this.selectAction();
+    }
+  }
+
   /** 游戏依据疲惫状态切换跑走，聊天片段播放时不能被基础快照覆盖。 */
   private selectAction(): void {
-    if (this.chatAction) return;
+    if (this.chatAction || this.talkingAction) return;
     const pose = this.chatWalking ? 'walk' : this.pose;
     if (pose === this.currentPose) return;
     this.currentPose = pose;
@@ -682,7 +796,7 @@ export class ModelRig {
     this.activeAction?.stop();
     action.reset().setLoop(THREE.LoopRepeat, Infinity).play();
     action.clampWhenFinished = false;
-    action.paused = !this.chatWalking && (pose.startsWith('turn_') || pose === 'somersault');
+    action.paused = !this.chatWalking && pose.startsWith('turn_');
     this.activeAction = action;
   }
 
@@ -709,6 +823,7 @@ export class ModelRig {
       this.activeAction.time = Math.min(1 - 1e-6, progress) * this.activeAction.getClip().duration;
     }
     this.mixer.update(delta);
+    this.object.rotation.x = 0;
     this.walkCycle.update(this.elapsed, this.chatWalking && !this.findAction('walk'));
     if (this.hips && this.hipsPosition) {
       this.hips.position.x = this.hipsPosition.x;
@@ -727,7 +842,6 @@ export class ModelRig {
   private applyExpression(): void {
     const expression = this.currentPose === 'tired' ? 'tired'
       : this.currentPose === 'spin' ? 'dizzy'
-      : this.currentPose === 'somersault' ? 'excited'
           : this.currentPose === 'talk' ? 'talk' : this.currentPose === 'idle' ? 'idle' : 'focused';
     for (const { mesh, names } of this.morphTargets) {
       if (!mesh.morphTargetInfluences) continue;
@@ -736,7 +850,6 @@ export class ModelRig {
         let value = 0;
         if (expression === 'tired' && /tired|sad|frown|mouthopen/.test(normalized)) value = 0.8;
         if (expression === 'dizzy' && /dizzy|confused|blink/.test(normalized)) value = 0.8;
-        if (expression === 'excited' && /happy|smile|excited|mouthopen/.test(normalized)) value = 0.9;
         if (expression === 'talk' && /mouth|talk|open/.test(normalized)) value = this.speechAmplitude;
         if (expression === 'idle' && /smile|happy/.test(normalized)) value = 0.25;
         mesh.morphTargetInfluences[index] = value;
@@ -759,12 +872,12 @@ export class ModelRig {
   private findAction(pose: string): THREE.AnimationAction | null {
     const mapping: Record<string, string> = {
       walk: 'walking',
+      backward: 'walk_backward',
       run: 'running',
       spin: 'walking',
-      turn_left: 'idle_turn_left',
-      turn_right: 'idle_turn_right',
-      turn_back: 'idle_turn_left',
-      somersault: 'backflip',
+      turn_left: this.actions.has('idle_turn_left') ? 'idle_turn_left' : 'walk_turn_left',
+      turn_right: this.actions.has('idle_turn_right') ? 'idle_turn_right' : 'walk_turn_right',
+      turn_back: this.actions.has('idle_turn_left') ? 'idle_turn_left' : 'walk_turn_left',
     };
     const exact = this.actions.get(pose.toLowerCase());
     if (exact) return exact;
@@ -774,10 +887,20 @@ export class ModelRig {
 
 /** 释放对象及其材质、几何体，避免重复开局造成 GPU 资源累积。 */
 function disposeObject(object: THREE.Object3D): void {
+  const textures = new Set<THREE.Texture>();
   object.traverse((child: THREE.Object3D) => {
     const mesh = child as THREE.Mesh;
     mesh.geometry?.dispose();
     const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
-    for (const material of materials) material?.dispose();
+    for (const material of materials) {
+      if (!material) continue;
+      for (const value of Object.values(material)) if (value instanceof THREE.Texture) textures.add(value);
+      material.dispose();
+    }
+    if (child instanceof THREE.SkinnedMesh) child.skeleton.dispose();
   });
+  for (const texture of textures) {
+    texture.dispose();
+    (texture.image as { close?: () => void } | undefined)?.close?.();
+  }
 }

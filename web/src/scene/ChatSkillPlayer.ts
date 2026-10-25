@@ -53,7 +53,7 @@ export class ChatSkillPlayer {
     return new Promise((resolve) => {
       this.resetTransform();
       const active: ActiveSkill = {
-        skill, elapsed: 0, duration: { spin: CIRCLE_DURATION_SECONDS, somersault: 1.8, dance: 2.4 }[skill],
+        skill, elapsed: 0, duration: { spin: CIRCLE_DURATION_SECONDS, jump: 1.867, dance: 2.4 }[skill],
         playback, automatic, resolve,
       };
       this.active = active;
@@ -80,10 +80,6 @@ export class ChatSkillPlayer {
       this.group.position.x = motion.x;
       this.group.position.z = motion.z;
       this.group.rotation.y = motion.rotation;
-    }
-    if (active.skill === 'somersault') {
-      this.group.rotation.x = progress * Math.PI * 2;
-      this.group.position.y = 1.6 + Math.sin(progress * Math.PI) * 1.1;
     }
     if (active.skill === 'dance') {
       this.group.rotation.z = Math.sin(progress * Math.PI * 12) * 0.16;
