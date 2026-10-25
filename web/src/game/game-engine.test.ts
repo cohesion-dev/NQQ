@@ -59,7 +59,7 @@ export async function runSelfTest(): Promise<void> {
   assertEqual(engine.snapshot().apples.length, 1, '抓到苹果后场内应暂时剩一颗');
 
   const collectedAt = events.find((event) => event.type === 'apple_collected')!.at;
-  assert(collectedAt > 300 && collectedAt < 800, '抓取时刻应为路径上的真实接触时刻');
+  assert(collectedAt > 0 && collectedAt < 300, '抓取时刻应为路径上的真实接触时刻');
   setTime(collectedAt + 999);
   engine.tick(collectedAt + 999);
   assertEqual(engine.snapshot().apples.length, 1, '补位延迟未到时不能生成苹果');
@@ -78,9 +78,9 @@ export async function runSelfTest(): Promise<void> {
   assertEqual(engine.snapshot().apples.length, 2, '苹果到期一秒后应独立补位');
 
   setTime(10_000);
-  await completeAction(engine, setTime, 'right', 10_100);
-  await completeAction(engine, setTime, 'forward', 10_200);
-  await completeAction(engine, setTime, 'spin', 11_600);
+  await completeAction(engine, setTime, 'right', 10_600);
+  await completeAction(engine, setTime, 'forward', 11_200);
+  await completeAction(engine, setTime, 'left', 15_800);
   assert(engine.snapshot().fatigued, '连续完成三个动作后应进入疲惫');
   setTime(30_000);
   engine.tick(30_000);
@@ -163,24 +163,18 @@ async function testContinuousMovement(): Promise<void> {
   const move = engine.requestAction('left');
   time = 200;
   engine.tick();
-  assertEqual(engine.snapshot().position.x, 0, '转向阶段不应推进地面位置');
-  assertEqual(engine.snapshot().actionPhase, 'turn', '移动前应先进入转向阶段');
+  assertEqual(engine.snapshot().position.x, -2, '移动阶段位置应连续推进');
+  assertEqual(engine.snapshot().actionPhase, 'walk', '移动直接进入行走阶段');
   time = 500;
   engine.tick();
-  assertEqual(engine.snapshot().position.x, -2, '行走阶段位置应连续推进');
-  assertEqual(engine.snapshot().actionPhase, 'walk', '转向完成后应进入行走阶段');
-  assertEqual(engine.snapshot().heading, 'left', '行走阶段应面向目标方向');
+  assertEqual(engine.snapshot().position.x, -4, '行走阶段位置应连续推进');
+  assertEqual(engine.snapshot().heading, 'front', '玩家视角移动不改变逻辑朝向');
   time = 600;
   engine.tick();
-  assertEqual(engine.snapshot().score, 1, '到期前经过苹果应立即抓取');
+  assertEqual(engine.snapshot().score, 1, '移动路径经过苹果应立即抓取');
   const collectedAt = events.find((event) => event.type === 'apple_collected')?.at;
-  assertEqual(collectedAt, 600, '抓取事件使用真实接触时刻');
-  time = 700;
-  engine.tick();
-  time = 1_000;
-  engine.tick();
+  assertEqual(collectedAt, 300, '抓取事件使用真实接触时刻');
   assertEqual((await move).collected, 1, '动作结果应包含执行中已抓取的苹果');
-  assertEqual(engine.snapshot().heading, 'front', '移动动作完成后应面向前方');
 
   // 玩家视角回归：向左后向前，第二个动作必须沿固定前方 z+ 移动，不能继续沿左侧 x-。
   let directionTime = 0;
@@ -200,38 +194,25 @@ async function testContinuousMovement(): Promise<void> {
   directionTime = 2_100;
   directionEngine.tick();
   assertEqual((await forwardPromise).status, 'completed', '向前动作应完成');
-  time = 1_599;
+  time = 700;
   engine.tick();
   assertEqual(engine.snapshot().apples.length, 1, '真实接触后一秒前不能补位');
-  time = 1_600;
+  time = 1_300;
   engine.tick();
   assertEqual(engine.snapshot().apples.length, 2, '真实接触后一秒恰好补位');
-
-  let tieTime = 0;
-  let tieRandom = 0;
-  const tie = new GameEngine({
-    now: () => tieTime,
-    random: () => randomValues[tieRandom++ % randomValues.length],
-    config: { stepDistance: 4, stepDurationMs: 400, appleCollisionRadius: 1 },
-  });
-  tie.start(600);
-  const tieMove = tie.requestAction('left');
-  tieTime = 1_000;
-  tie.tick();
-  assertEqual((await tieMove).collected, 0, '接触与到期同刻时应到期优先');
 
   const stopping = new GameEngine({ now: () => 0, config: { stepDistance: 4, stepDurationMs: 400 } });
   stopping.start();
   const stopped = stopping.requestAction('left');
   stopping.stop();
   assertEqual((await stopped).status, 'cancelled', '停止应取消未完成动作');
-  assertEqual(stopping.snapshot().position.x, 0, '转向阶段停止不能产生位移');
+  assertEqual(stopping.snapshot().position.x, 0, '停止应保留当前实际位置');
 
   const fatigue = createTestEngine();
   fatigue.engine.start();
-  await completeAction(fatigue.engine, fatigue.setTime, 'right', 100);
-  await completeAction(fatigue.engine, fatigue.setTime, 'left', 1_500);
-  await completeAction(fatigue.engine, fatigue.setTime, 'spin', 3_000);
+  await completeAction(fatigue.engine, fatigue.setTime, 'right', 600);
+  await completeAction(fatigue.engine, fatigue.setTime, 'left', 1_200);
+  await completeAction(fatigue.engine, fatigue.setTime, 'forward', 1_800);
   assert(fatigue.engine.snapshot().fatigued, '连续三个完整动作后应疲惫');
 
   const deadline = new GameEngine({ now: () => 0 });
@@ -239,6 +220,6 @@ async function testContinuousMovement(): Promise<void> {
   const interrupted = deadline.requestAction('right');
   deadline.tick(50);
   assertEqual(deadline.snapshot().phase, 'finished', '服务端提前截止时间应保留');
-  assertEqual(deadline.snapshot().position.x, 0, '截止时未完成转向不能产生位移');
+  assert(Math.abs(deadline.snapshot().position.x - 1 / 12) < 1e-9, '截止时保留当前玩家视角移动位置');
   assertEqual((await interrupted).status, 'cancelled', '截止应取消未完成动作');
 }

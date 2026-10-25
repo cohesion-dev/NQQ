@@ -6,11 +6,16 @@ import { CIRCLE_DURATION_SECONDS } from '../shared/circle-motion.ts';
 
 /** 验证聊天动作边界；翻跟头已从工具和播放器移除。 */
 export async function testChatSkills(): Promise<void> {
-  assert.deepEqual(chatSkills, ['spin', 'jump', 'dance']);
+  assert.deepEqual(chatSkills, ['left', 'right', 'forward', 'backward', 'spin', 'jump', 'dance']);
   assert.equal(canPerformAction('chat', 'spin'), true);
+  assert.equal(canPerformAction('chat', 'left'), true);
+  assert.equal(canPerformAction('chat', 'right'), true);
+  assert.equal(canPerformAction('chat', 'forward'), true);
+  assert.equal(canPerformAction('chat', 'backward'), true);
   assert.equal(canPerformAction('chat', 'dance'), true);
   assert.equal(canPerformAction('chat', 'jump'), true);
   assert.equal(canPerformAction('apple-game', 'spin'), true);
+  assert.equal(canPerformAction('apple-game', 'jump'), false);
 
   const player = new ChatSkillPlayer();
   const spinPromise = player.play('spin');

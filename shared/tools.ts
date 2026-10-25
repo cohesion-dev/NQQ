@@ -2,13 +2,13 @@
 export const actions = ['left', 'right', 'forward', 'backward', 'spin', 'jump', 'dance', 'stop'] as const;
 
 /** 聊天技能只改变角色表现，不创建苹果游戏或改变得分。 */
-export const chatSkills = ['spin', 'jump', 'dance'] as const;
+export const chatSkills = ['left', 'right', 'forward', 'backward', 'spin', 'jump', 'dance'] as const;
 export type ChatSkill = typeof chatSkills[number];
 
 /** 网关和页面共用模式限制，防止聊天技能被当作未开局动作拒绝。 */
 export function canPerformAction(mode: 'chat' | 'apple-game', action: unknown): boolean {
   if (mode === 'chat') return action === 'stop' || chatSkills.some((skill) => skill === action);
-  return actions.some((name) => name === action) && action !== 'dance';
+  return actions.some((name) => name === action) && action !== 'dance' && action !== 'jump';
 }
 
 /** 向灵矽报告可用的端侧工具，不提供苹果坐标或自动寻路。 */
@@ -20,7 +20,7 @@ export const tools = [
   },
   {
     name: 'self.niuqiqi.do_action',
-    description: '聊天模式允许 spin 原地绕圈、jump 跳跃、dance 跳舞和 stop 停止，不需开始游戏。游戏模式允许 left/right/forward/backward 移动、spin 和 stop；游戏不跳跃。spin 是围绕身旁中心点走一圈（约4.2秒，结束回到起点并面向前方），游戏中会抓取沿途苹果，触边提前结束。移动会先转向、行走、最后回正；方向按画面判断。工具实际完成后才返回结果。',
+    description: '聊天模式允许 left/right/forward/backward 播放 idle.glb 的对应动作，spin 原地绕圈、jump 跳跃、dance 跳舞和 stop 停止，不需开始游戏。游戏模式允许 left/right/forward/backward 移动、spin 和 stop；游戏不跳跃。spin 是围绕身旁中心点走一圈（约4.2秒，结束回到起点并面向前方），游戏中会抓取沿途苹果，触边提前结束。游戏四个移动方向始终按玩家画面坐标执行，不随牛当前朝向改变。工具实际完成后才返回结果。',
     inputSchema: {
       type: 'object', properties: {
         action: { type: 'string', enum: actions },

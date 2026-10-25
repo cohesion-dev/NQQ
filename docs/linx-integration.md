@@ -41,7 +41,7 @@
 MCP（Model Context Protocol，模型上下文协议，用于发现和调用工具）消息封装在设备连接中。当前唯一工具定义位于 `shared/tools.ts`：
 
 - `self.niuqiqi.start_apple_game`：玩家明确想玩抓苹果时切换游戏模式。
-- `self.niuqiqi.do_action`：动作集合 `left/right/forward/backward/spin/dance/stop`；游戏移动步数为 1 到 3，触边后提前结束，移动动作包含转向、行走和回正阶段；聊天模式允许 `spin`、`dance` 和 `stop`，它们不启动游戏也不计分。聊天模式使用正视镜头，游戏模式使用斜上方抓苹果镜头。
+- `self.niuqiqi.do_action`：动作集合 `left/right/forward/backward/spin/jump/dance/stop`；游戏移动步数为 1 到 3，触边后提前结束，四个方向始终按玩家画面坐标执行，不追加自动转向或回正；聊天模式允许左右前后、`spin`、`jump`、`dance` 和 `stop`，这些动作只播放 idle.glb，不启动游戏也不计分。聊天舞蹈最长等待 15 秒，以覆盖 idle.glb 中的长舞蹈片段。聊天模式使用正视镜头，游戏模式使用斜上方抓苹果镜头。
 - `self.niuqiqi.exit_apple_game`：玩家明确退出游戏时回到聊天模式。
 - `self.niuqiqi.get_status`：读取本局阶段、分数、剩余毫秒和疲惫状态，不报告苹果坐标。
 

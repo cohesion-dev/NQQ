@@ -234,6 +234,10 @@ export function attachGateway(http: import('node:http').Server | import('node:ht
         const toolName = payload.params?.name;
         if (toolName === 'self.niuqiqi.start_apple_game') {
           if (mode !== 'chat') return toolResult(key, 'Game is already running', true);
+          // MCP 请求编号可能在新一轮对话中复用，不能让上一局缓存阻塞新开局。
+          for (const [pendingKey, pendingItem] of pending) {
+            if (pendingKey !== key && pendingItem.name === 'self.niuqiqi.start_apple_game') pending.delete(pendingKey);
+          }
           mode = 'apple-game';
           roundId = randomUUID();
           deadline = Date.now() + 180_000;
@@ -243,12 +247,18 @@ export function attachGateway(http: import('node:http').Server | import('node:ht
             send({ type: 'finished', roundId, mode: 'apple-game' });
             mode = 'chat';
             deadline = 0;
+            for (const [pendingKey, pendingItem] of pending) {
+              if (pendingItem.name === 'self.niuqiqi.do_action') pending.delete(pendingKey);
+            }
             send({ type: 'mode', mode });
           }, 180_000);
         } else if (toolName === 'self.niuqiqi.exit_apple_game') {
           if (mode !== 'apple-game') return toolResult(key, 'Game is not running', true);
           mode = 'chat';
           deadline = 0;
+          for (const [pendingKey, pendingItem] of pending) {
+            if (pendingItem.name === 'self.niuqiqi.do_action') pending.delete(pendingKey);
+          }
           send({ type: 'mode', mode });
         } else if (toolName === 'self.niuqiqi.do_action') {
           if (!canPerformAction(mode, args.action)) return toolResult(key, 'Action is unavailable in the current mode', true);
@@ -256,7 +266,7 @@ export function attachGateway(http: import('node:http').Server | import('node:ht
         }
         // 舞蹈约 8.17 秒，游戏队列最多两次 4.2 秒绕圈，保留传输余量。
         const toolTimeoutMs = toolName === 'self.niuqiqi.do_action'
-          ? mode === 'apple-game' ? 10000 : args.action === 'dance' ? 12000 : 6000 : 6000;
+          ? mode === 'apple-game' ? 10000 : args.action === 'dance' ? 15000 : 6000 : 6000;
         pending.get(key)!.timer = setTimeout(() => {
           toolResult(key, 'Tool execution timed out', true);
           send({ type: 'cancel', requestId: key, roundId });

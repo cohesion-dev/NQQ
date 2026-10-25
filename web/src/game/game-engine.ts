@@ -35,6 +35,8 @@ interface PendingAction {
   targetHeading: Heading;
 }
 
+const MAX_ACTION_DURATION_MS = 5_000;
+
 interface TimelineEvent {
   at: number;
   kind: 'expire' | 'respawn' | 'collect' | 'action';
@@ -142,6 +144,7 @@ export class GameEngine {
       this.lastTime = at;
       return;
     }
+    this.enforceActionTimeout(at);
     if (this.endsAt !== null && at >= this.endsAt) {
       this.processUntil(this.endsAt, false);
       this.lastTime = this.endsAt;
@@ -151,6 +154,22 @@ export class GameEngine {
     this.processUntil(at, true);
     this.lastTime = at;
     if (this.lastPublishedTime !== at) this.publish([]);
+  }
+
+  /** 普通动作从开始到最多五秒；超时立即取消当前和等待队列，避免旧指令长尾执行。 */
+  private enforceActionTimeout(target: number): void {
+    while (this.currentAction?.action !== 'spin' && this.currentAction?.startedAt !== null && this.currentAction?.startedAt !== undefined
+      && target >= this.currentAction.startedAt + MAX_ACTION_DURATION_MS) {
+      const timeoutAt = this.currentAction.startedAt + MAX_ACTION_DURATION_MS;
+      this.processUntil(timeoutAt, true);
+      const pending = this.currentAction;
+      if (!pending || pending.startedAt === null || pending.startedAt + MAX_ACTION_DURATION_MS > target) break;
+      this.cancelAction(pending, timeoutAt, 'action_timeout');
+      while (this.queue.length > 0) {
+        const queued = this.queue.shift();
+        if (queued) this.cancelAction(queued, timeoutAt, 'action_timeout');
+      }
+    }
   }
 
   /** update 是 tick 的语义别名，方便页面动画循环调用。 */
@@ -397,20 +416,6 @@ export class GameEngine {
   private completeActionStep(at: number): void {
     const pending = this.currentAction;
     if (!pending) return;
-    if (pending.phase === 'turn') {
-      this.heading = pending.targetHeading;
-      if (pending.action === 'spin') {
-        this.prepareActionPhase(pending, at);
-      } else {
-        this.prepareStep(pending, at);
-      }
-      return;
-    }
-    if (pending.phase === 'face_front') {
-      this.heading = 'front';
-      this.completeFinalAction(pending, at);
-      return;
-    }
     if (pending.phase === 'spin') {
       pending.stepsCompleted = 1;
       this.heading = 'front';
@@ -426,12 +431,6 @@ export class GameEngine {
         this.prepareStep(pending, at);
         return;
       }
-      if (this.heading !== 'front') {
-        pending.phase = 'face_front';
-        pending.startedAt = at;
-        pending.dueAt = at + this.turnDurationMs(this.heading, 'front');
-        return;
-      }
       this.completeFinalAction(pending, at);
     }
   }
@@ -445,14 +444,6 @@ export class GameEngine {
       const boundary = firstCircleBoundaryProgress(pending.stepStart, this.config.bounds);
       pending.touchedBoundary = boundary !== null;
       pending.dueAt = at + this.config.spinDurationMs * (boundary ?? 1);
-      return;
-    }
-    const target = this.headingForAction(pending.action);
-    pending.targetHeading = target;
-    if (this.heading !== target) {
-      pending.phase = 'turn';
-      pending.startedAt = at;
-      pending.dueAt = at + this.turnDurationMs(this.heading, target);
       return;
     }
     this.prepareStep(pending, at);

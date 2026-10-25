@@ -22,6 +22,7 @@ function startApp(): void {
   let currentRound = '';
   let lifespan = 60_000;
   let recorderStarted = false;
+  const inFlightTools = new Map<string, Promise<Record<string, unknown> | ActionResult | undefined>>();
   const client = new LinxClient((message) => void receive(message), (frame) => { void audio.push(frame); });
   const ui = new UiController(root);
   const audio = new LinxAudio((active) => {
@@ -84,6 +85,7 @@ function startApp(): void {
     }
     if (message.type === 'round' && message.mode === 'apple-game') {
       idleTimer.reset();
+      inFlightTools.clear();
       currentRound = message.roundId;
       lifespan = 60_000;
       mode = 'apple-game';
@@ -94,6 +96,7 @@ function startApp(): void {
     }
     if (message.type === 'mode') {
       idleTimer.reset();
+      inFlightTools.clear();
       mode = message.mode === 'apple-game' ? 'apple-game' : 'chat';
       scene.setMode(mode);
       ui.setMode(mode);
@@ -103,7 +106,10 @@ function startApp(): void {
     if (message.type === 'tool') {
       idleTimer.reset();
       scene.cancelIdleDance();
-      const result = await handleTool(message);
+      const existing = inFlightTools.get(message.requestId);
+      const resultPromise = existing ?? handleTool(message);
+      if (!existing) inFlightTools.set(message.requestId, resultPromise);
+      const result = await resultPromise;
       if (result !== undefined) client.send({ type: 'result', roundId: message.roundId || currentRound, requestId: message.requestId, result, failed: 'status' in result && result.status !== 'completed' });
       return;
     }
@@ -120,6 +126,7 @@ function startApp(): void {
     if (message.type === 'finished') {
       // 先让规则引擎发出唯一的结束事件，由订阅回调统一播报结算。
       game.end();
+      inFlightTools.clear();
       mode = 'chat'; currentRound = '';
       scene.setMode(mode); ui.setMode(mode);
       return;

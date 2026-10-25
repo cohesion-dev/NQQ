@@ -125,11 +125,11 @@ export async function testGameSpin(): Promise<void> {
   const queued = createSpinGame();
   const move = queued.engine.requestAction('left');
   const queuedSpin = queued.engine.requestAction('spin');
-  queued.setTime(1_200 + duration / 2);
+  queued.setTime(600 + duration / 2);
   assert.equal((await move).status, 'completed');
   near(queued.engine.snapshot().position.x, -1);
   near(queued.engine.snapshot().position.z, -2);
-  queued.setTime(1_200 + duration);
+  queued.setTime(600 + duration);
   assert.equal((await queuedSpin).status, 'completed');
   assert.deepEqual(queued.engine.snapshot().position, { x: -1, z: 0 });
 }

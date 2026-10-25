@@ -9,7 +9,7 @@ import type { SceneSnapshot, SceneViewApi, SceneViewOptions } from './types';
 const DEFAULT_BACKGROUND = 0xaed8f2;
 const GAME_MODEL_URL = new URL('../../../assets/game.glb', import.meta.url).href;
 const IDLE_MODEL_URL = new URL('../../../assets/idle.glb', import.meta.url).href;
-export const DANCE_CLIPS = ['Hip_Hop_Dance_1', 'Hip_Hop_Dance_3', 'OMG_Groove'] as const;
+export const DANCE_CLIPS = ['Hip_Hop_Dance_1', 'Hip_Hop_Dance_3'] as const;
 export const JUMP_CLIPS = ['Regular_Jump', 'Happy_jump_f', 'Jump_with_Arms_and_Legs_Open'] as const;
 export const IDLE_EXCLUDED_CLIPS = new Set(['Running', 'Walking']);
 
@@ -145,7 +145,12 @@ export class SceneView implements SceneViewApi {
     if (this.chatSkills.isPlaying) {
       return Promise.resolve({ status: 'rejected', action: skill, mode: 'chat', reason: 'skill_busy' });
     }
-    return this.chatSkills.play(skill, this.modelCow?.prepareChatPlayback(skill));
+    const playback = this.modelCow?.prepareChatPlayback(skill);
+    // 有实际 GLB 片段才播放；禁止退回 ChatSkillPlayer 的程序化摇摆舞。
+    if (skill === 'dance' && !playback) {
+      return Promise.resolve({ status: 'rejected', action: skill, mode: 'chat', reason: 'idle_animation_not_ready' });
+    }
+    return this.chatSkills.play(skill, playback);
   }
 
   /** 向空闲计时提供统一占用状态，包含真实动画和程序化绕圈。 */
@@ -358,10 +363,7 @@ export class SceneView implements SceneViewApi {
           disposeObject(object);
           return;
         }
-        const idleDanceClips = kind === 'idle'
-          ? gltf.animations.map((clip) => clip.name).filter((name) => !IDLE_EXCLUDED_CLIPS.has(name))
-          : DANCE_CLIPS;
-        const rig = new ModelRig(object, gltf.animations, Math.random, idleDanceClips);
+        const rig = new ModelRig(object, gltf.animations, Math.random, DANCE_CLIPS);
         rig.group.name = `niuqiqi-${kind}-model`;
         this.chatSkills.content.add(rig.group);
         if (kind === 'game') this.gameCow = rig;
@@ -439,21 +441,16 @@ export function toSceneSnapshot(snapshot: GameSnapshotLike): SceneSnapshot {
   const angles = { front: 0, right: Math.PI / 2, back: Math.PI, left: -Math.PI / 2 };
   const headingRotation = angles[snapshot.heading];
   const circle = snapshot.actionPhase === 'spin' ? sampleCircleMotion(snapshot.actionProgress * CIRCLE_DURATION_SECONDS) : null;
-  const turning = snapshot.actionPhase === 'turn' || snapshot.actionPhase === 'face_front';
-  const targetRotation = snapshot.actionPhase === 'face_front' ? 0 : angles[snapshot.targetHeading ?? snapshot.heading];
-  let turnAngle = Math.atan2(Math.sin(targetRotation - headingRotation), Math.cos(targetRotation - headingRotation));
-  if (Math.abs(Math.abs(turnAngle) - Math.PI) < 1e-6) turnAngle = -Math.PI;
-  const pose = turning ? (Math.abs(turnAngle) > Math.PI / 2 + 1e-6 ? 'turn_back' : turnAngle < 0 ? 'turn_left' : 'turn_right')
-        : snapshot.actionPhase === 'spin' ? 'spin'
+  const pose = snapshot.actionPhase === 'spin' ? 'spin'
         : snapshot.actionPhase === 'walk' ? (snapshot.currentAction === 'backward' ? 'backward' : 'walk')
     : snapshot.currentAction === 'stop' ? 'stop' : 'idle';
   return {
     phase: snapshot.phase === 'finished' ? 'result' : snapshot.phase,
     cow: {
       x: snapshot.position.x, z: snapshot.position.z,
-      rotation: circle?.rotation ?? headingRotation + (turning ? turnAngle * snapshot.actionProgress : 0),
+      rotation: circle?.rotation ?? 0,
       pose, tired: snapshot.fatigued, actionProgress: snapshot.actionProgress,
-      turnSteps: turning ? Math.max(1, Math.round(Math.abs(turnAngle) / (Math.PI / 2))) : 1,
+      turnSteps: 1,
     },
     apples: snapshot.apples.map((apple) => ({
       id: apple.id, x: apple.position.x, z: apple.position.z,
@@ -712,6 +709,10 @@ export class ModelRig {
     if (skill === 'spin') return undefined;
     const candidates = skill === 'jump'
       ? JUMP_CLIPS.filter(name => this.actions.has(name.toLowerCase()))
+      // 该 idle.glb 的左右转片段视觉方向与名称相反，按玩家看到的方向交换映射。
+      : skill === 'left' ? ['Walk_Turn_Right']
+        : skill === 'right' ? ['Walk_Turn_Left']
+          : skill === 'forward' || skill === 'backward' ? ['Walking']
       : this.danceClips.filter(name => this.actions.has(name.toLowerCase()));
     const name = candidates[Math.floor(this.random() * candidates.length)];
     return this.preparePlayback(name);

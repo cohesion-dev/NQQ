@@ -15,7 +15,7 @@ Vite 通过静态 `new URL(..., import.meta.url)` 引用两份资源，构建会
 
 `Running`、`Walking`、`Run_Turn_Left`、`Run_Turn_Right`、`Walk_Backward`、`Walk_Turn_Left`、`Walk_Turn_Right`。
 
-正常移动播放 Running，向后移动播放 Walk_Backward，疲惫和绕圈播放 Walking。前后左右和角色朝向的最终语义暂缓，待方向规则重新确认后再接入。当前不把转身动作作为稳定交付承诺；水平根位移锁定，规则层仍是位置、碰撞和得分的唯一来源。
+正常移动播放 Running，向后移动播放 Walk_Backward，疲惫和绕圈播放 Walking。四个方向始终按玩家画面坐标执行，不追加转身和回正；左右移动暂用 Running 表现，向后移动使用 Walk_Backward。单个普通游戏动作最多执行 5 秒，超时会取消当前动作和等待队列，避免旧指令长尾；spin 仍使用完整圆周时长。水平根位移锁定，规则层仍是位置、碰撞和得分的唯一来源。
 
 Regular_Jump、抓墙和挥拳等虽在文件中，不因此自动新增工具或改变抓取规则。游戏不需要跳跃或摘苹果动作；苹果由碰撞规则自动抓取。
 
@@ -23,7 +23,7 @@ Regular_Jump、抓墙和挥拳等虽在文件中，不因此自动新增工具�
 
 自动闲置从 `idle.glb` 动画列表自动生成：排除 `Running` 和 `Walking`，其余动作每次随机选择。这样更换 idle.glb 后不需要再改代码列动作名。每段完整播放一次，动作结束后暂停 0.5 秒再随机衔接下一段。仅聊天模式、页面在前台且双方静默三秒时启动，不依赖灵矽连接是否已经就绪。说话时停止随机闲置，循环播放 `Talk_with_Hands_Open`；说话结束后重新等待三秒并随机选择。切入游戏后停止并隐藏 idle 模型，返回聊天后重新随机；主动技能优先。
 
-主动 dance 从 idle.glb 中除 `Running`、`Walking` 外的动作随机选择；聊天模式的 jump 指令优先播放 `Regular_Jump`，没有该片段时回退到 `Happy_jump_f`。当前文件包含 `Happy_jump_f`、`Hip_Hop_Dance_1`、`Hip_Hop_Dance_3`、`Idle_10`、`Idle_15`、`OMG_Groove`、`Regular_Jump`、`Stand_and_Chat`、`Talk_with_Hands_Open` 等片段；以文件实际清单为准。游戏模式不接受 jump。
+主动 dance 只从 `Hip_Hop_Dance_1`、`Hip_Hop_Dance_3` 随机选择，排除加载较慢的 `OMG_Groove`；聊天模式的 jump 指令优先播放 `Regular_Jump`，没有该片段时回退到 `Happy_jump_f`。当前文件包含 `Happy_jump_f`、`Hip_Hop_Dance_1`、`Hip_Hop_Dance_3`、`Idle_10`、`Idle_15`、`OMG_Groove`、`Regular_Jump`、`Stand_and_Chat`、`Talk_with_Hands_Open` 等片段；以文件实际清单为准。游戏模式不接受 jump。
 
 ## 测试与限制
 
