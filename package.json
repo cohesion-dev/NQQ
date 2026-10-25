@@ -7,9 +7,18 @@
     "dev": "vite",
     "server": "node --import tsx server/index.ts",
     "test": "node --import tsx tests/run.ts",
+    "test:coverage": "c8 node --import tsx tests/run.ts",
     "test:browser": "node tests/browser.mjs",
     "build": "tsc --noEmit && vite build",
     "typecheck": "tsc --noEmit"
+  },
+  "c8": {
+    "all": true,
+    "src": ["web/src", "server", "shared"],
+    "include": ["web/src/**/*.{ts,js}", "server/**/*.ts", "shared/**/*.ts"],
+    "exclude": ["**/*.test.ts", "web/src/scene/types.ts"],
+    "reporter": ["text", "html", "json-summary", "lcov"],
+    "reports-dir": "coverage"
   },
   "dependencies": {
     "dotenv": "^18.0.9",
@@ -21,6 +30,7 @@
     "@types/node": "^26.6.5",
     "@types/three": "^0.180.0",
     "@types/ws": "^8.18.2",
+    "c8": "^12.0.0",
     "playwright": "^1.64.1",
     "tsx": "^4.23.15",
     "typescript": "^5.9.2",

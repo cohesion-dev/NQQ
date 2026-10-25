@@ -4,6 +4,25 @@
 
 [本地运行](#本地运行) · [构建后运行](#构建后运行) · [架构说明](docs/architecture.md) · [模型动作](docs/model-assets.md)
 
+## 单元测试覆盖率
+
+以下为 2026-10-25 使用 Node.js 22.21.1 和 c8 12.0.0 执行 `npm run test:coverage` 的实测快照：
+
+| 指标 | 覆盖率 | 已覆盖 / 总数 |
+| --- | ---: | ---: |
+| 行 | **54.66%** | 1630 / 2982 |
+| 语句 | **54.66%** | 1630 / 2982 |
+| 函数 | **86.57%** | 129 / 149 |
+| 分支 | **86.50%** | 513 / 593 |
+
+统计范围为 `web/src/`、`server/`、`shared/` 中的 TypeScript 和 JavaScript 源码，未被单测执行的文件按零覆盖计入；排除测试文件及仅含类型声明的 `web/src/scene/types.ts`。指标采用 c8（基于 JavaScript 引擎执行数据的覆盖率工具）的统计口径，不包含浏览器自动化结果，也不代表真实语音或真机验收。
+
+```sh
+npm run test:coverage
+```
+
+命令运行现有单测并生成终端汇总、`coverage/index.html` 明细、`coverage/coverage-summary.json` 汇总数据和 `coverage/lcov.info` 通用报告。GitHub Actions（自动化检查服务）每次检查重新统计，在运行摘要展示指标，并提供 `unit-test-coverage` 报告下载。上表为手动维护的快照，更新时应同时核对百分比、计数和日期；最新结果以对应运行的报告为准。
+
 ## 当前实现
 
 - 面向 iPhone 12 Pro Max 竖屏的移动网页：使用动态视口高度和安全区域，默认显示聊天模式，游戏模式显示规则、挑战和结算。

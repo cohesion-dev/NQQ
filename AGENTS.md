@@ -11,7 +11,7 @@
 - 灵矽负责语音识别、意图理解、工具调用、普通问答和语音合成。
 - iOS 外壳使用 `WKWebView` 加载与 Web 端相同的页面。
 
-当前已实现移动网页、本地游戏规则、程序化模型与声音占位及灵矽网关，真实设备握手和工具发现已验证，完整语音/文字互动待页面联调。运行和验证方式见 [`README.md`](README.md)，设计见 [`docs/implementation-plan.md`](docs/implementation-plan.md)。原生 iOS 外壳和真机验收尚未完成，测试覆盖率百分比尚未统计。
+当前已实现移动网页、本地游戏规则、程序化模型与声音占位及灵矽网关，真实设备握手和工具发现已验证，完整语音/文字互动待页面联调。运行和验证方式见 [`README.md`](README.md)，设计见 [`docs/implementation-plan.md`](docs/implementation-plan.md)。原生 iOS 外壳和真机验收尚未完成，单元测试覆盖率及统计口径见 [`README.md`](README.md#单元测试覆盖率)。
 
 ## 协作与提交规则
 

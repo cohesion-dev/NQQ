@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import vm from 'node:vm';
+import { resolve } from 'node:path';
 import { runSelfTest } from '../web/src/game/game-engine.test.ts';
 import { validTool } from '../shared/tools.ts';
 import { testChatSkills } from './chat-skills.test.ts';
@@ -39,7 +40,7 @@ async function testPcm(rate: number): Promise<void> {
     AudioWorkletProcessor: class { port = { postMessage: (frame: { pcm: ArrayBuffer; speech: boolean }) => frames.push(frame) }; },
     registerProcessor: (_name: string, constructor: any) => { Processor = constructor; },
   });
-  vm.runInContext(await readFile('web/src/audio/pcm-worklet.js', 'utf8'), context);
+  vm.runInContext(await readFile('web/src/audio/pcm-worklet.js', 'utf8'), context, { filename: resolve('web/src/audio/pcm-worklet.js') });
   const processor = new Processor();
   for (let offset = 0; offset < rate; offset += 128) {
     processor.process([[new Float32Array(Math.min(128, rate - offset)).fill(0.25)]]);
@@ -60,7 +61,7 @@ async function testVadTransition(): Promise<void> {
     AudioWorkletProcessor: class { port = { postMessage: (frame: { pcm: ArrayBuffer; speech: boolean }) => frames.push(frame) }; },
     registerProcessor: (_name: string, constructor: any) => { Processor = constructor; },
   });
-  vm.runInContext(await readFile('web/src/audio/pcm-worklet.js', 'utf8'), context);
+  vm.runInContext(await readFile('web/src/audio/pcm-worklet.js', 'utf8'), context, { filename: resolve('web/src/audio/pcm-worklet.js') });
   const processor = new Processor();
   for (let index = 0; index < 125; index += 1) processor.process([[new Float32Array(128).fill(0.25)]]);
   for (let index = 0; index < 125; index += 1) processor.process([[new Float32Array(128)]]);
