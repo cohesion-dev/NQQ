@@ -1,27 +1,10 @@
 # 牛七七
 
+[![codecov](https://codecov.io/gh/cohesion-dev/NQQ/branch/main/graph/badge.svg)](https://codecov.io/gh/cohesion-dev/NQQ)
+
 三分钟语音陪伴与蒙眼抓苹果小游戏。打开应用后默认聊天，玩家说“我想玩抓苹果”才进入游戏，靠近苹果自动装入口袋。
 
 [本地运行](#本地运行) · [构建后运行](#构建后运行) · [架构说明](docs/architecture.md) · [模型动作](docs/model-assets.md)
-
-## 单元测试覆盖率
-
-以下为 2026-10-25 使用 Node.js 22.21.1 和 c8 12.0.0 执行 `npm run test:coverage` 的实测快照：
-
-| 指标 | 覆盖率 | 已覆盖 / 总数 |
-| --- | ---: | ---: |
-| 行 | **54.66%** | 1630 / 2982 |
-| 语句 | **54.66%** | 1630 / 2982 |
-| 函数 | **86.57%** | 129 / 149 |
-| 分支 | **86.50%** | 513 / 593 |
-
-统计范围为 `web/src/`、`server/`、`shared/` 中的 TypeScript 和 JavaScript 源码，未被单测执行的文件按零覆盖计入；排除测试文件及仅含类型声明的 `web/src/scene/types.ts`。指标采用 c8（基于 JavaScript 引擎执行数据的覆盖率工具）的统计口径，不包含浏览器自动化结果，也不代表真实语音或真机验收。
-
-```sh
-npm run test:coverage
-```
-
-命令运行现有单测并生成终端汇总、`coverage/index.html` 明细、`coverage/coverage-summary.json` 汇总数据和 `coverage/lcov.info` 通用报告。GitHub Actions（自动化检查服务）每次检查重新统计，在运行摘要展示指标，并提供 `unit-test-coverage` 报告下载。上表为手动维护的快照，更新时应同时核对百分比、计数和日期；最新结果以对应运行的报告为准。
 
 ## 当前实现
 
@@ -129,11 +112,16 @@ npm run server
 
 ```sh
 npm test
+npm run test:coverage
 npm run typecheck
 npm run build
 ```
 
 规则测试使用可控时间，覆盖三分钟截止、苹果生命周期、连续移动和真实接触时刻、停止与疲惫；音频测试验证 44.1kHz/48kHz 输入转换为 16kHz 单声道的分帧采样数，以及实际 Opus 解码、连续播放调度、正常结束排空、取消和重连隔离。
+
+覆盖率统计 `web/src/`、`server/`、`shared/` 的源码，未执行文件按零覆盖计入，排除测试文件及仅含类型声明的 `web/src/scene/types.ts`；本地报告位于 `coverage/index.html`。持续集成保留指标摘要及 `unit-test-coverage` 报告下载。
+
+仓库公开后，在 Codecov 添加 `cohesion-dev/NQQ`，并在组织设置中关闭公开仓库上传的令牌要求；工作流会将 `coverage/lcov.info` 无令牌上传，首页徽章展示 `main` 的最新结果。仓库仍为私有时跳过上传，公开后的首次主分支报告成功处理后徽章才会显示覆盖率。[配置说明](https://docs.codecov.com/docs/codecov-tokens#uploading-without-a-token)
 
 开发服务器运行时，可另开终端执行浏览器检查：
 
